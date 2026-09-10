@@ -1,0 +1,12 @@
+{
+  "sharpness": { "type": "weapon", "maxLevel": 5, "effect": "increases damage" },
+  "protection": { "type": "armor", "maxLevel": 4, "effect": "reduces damage" },
+  "efficiency": { "type": "tool", "maxLevel": 5, "effect": "increases mining speed" },
+  "fortune": { "type": "tool", "maxLevel": 3, "effect": "increases block drops" },
+  "unbreaking": { "type": "all", "maxLevel": 3, "effect": "increases durability" },
+  "mending": { "type": "all", "maxLevel": 1, "effect": "repairs with xp" },
+  "silk_touch": { "type": "tool", "maxLevel": 1, "effect": "mines blocks as themselves" },
+  "power": { "type": "bow", "maxLevel": 5, "effect": "increases arrow damage" },
+  "looting": { "type": "weapon", "maxLevel": 3, "effect": "increases mob drops" },
+  "fire_aspect": { "type": "weapon", "maxLevel": 2, "effect": "sets targets on fire" }
+}

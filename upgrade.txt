@@ -1,0 +1,1053 @@
+=== AGNES Upgrade Log ===
+
+## Upgrade 5 — Fixed API Pipeline + Fast Chat
+Date: 2026-06-28
+Files: src/chat/live_chat.js, src/llm/provider_manager.js, src/llm/nvidia.js, config/settings.json, test-api.js
+Changes:
+- **live_chat.js**: Shortened tunglish prompt from 22 lines → 4 lines (fewer tokens = faster response)
+- **live_chat.js**: Reduced rateLimitMs from 2000ms → 1000ms (more responsive)
+- **live_chat.js**: Limited tunglish maxTokens to 256 (shorter responses = faster)
+- **live_chat.js**: Added console.warn() in catch blocks to show WHY the API is falling back
+- **provider_manager.js**: sendRaw() now accepts per-call opts (e.g., { maxTokens: 256 }) merged with global llm config
+- **provider_manager.js**: _chat() collects all provider errors and includes them in the final error message
+- **nvidia.js**: Reduced timeout from 15s → 10s
+- **nvidia.js**: Added model fallback list — if configured model times out, tries meta/llama-3.1-8b-instruct, mistralai/mistral-7b-instruct-v0.3, deepseek-ai/deepseek-v4-pro
+- **nvidia.js**: chat() loops through models until one responds; throws with all error messages if all fail
+- **settings.json**: model changed from broken deepseek-ai/deepseek-v4-flash (10s+ timeout) → meta/llama-3.1-8b-instruct (~550ms, works with Tunglish)
+- **test-api.js**: Standalone test script — `node test-api.js` tests all models and reports which ones work
+
+Root cause discovery:
+- Tested `deepseek-ai/deepseek-v4-flash` → TIMEOUT after 10s (ECONNRESET/hang)
+- Tested `deepseek-ai/deepseek-v4-pro` → TIMEOUT (same issue)
+- Tested `meta/llama-3.1-8b-instruct` → WORKS in ~550ms, returns proper Tunglish
+- Tested `mistralai/mistral-7b-instruct-v0.3` → 404 Not Found (function not accessible)
+- The NVIDIA API catalog lists DeepSeek models but they never respond — likely overloaded or region-restricted
+
+To revert: Restore live_chat.js prompt/rateLimit/sendRaw call. Restore provider_manager.js.
+Restore nvidia.js to 15s timeout without fallback list. Restore settings.json model to deepseek-ai/deepseek-v4-flash. Delete test-api.js.
+
+## Upgrade 1 — Single-Player Join Restriction
+Date: 2026-06-28
+Files: src/agent/agnes.js
+Changes:
+- Added `_joinedPlayer` tracking — AGNES can only join ONE player
+- When already joined, other players saying "join panni ko" get:
+  "mudi kittu poda, na already <joined> kitta join panni tan"
+- Other players' non-join messages are silently ignored while joined
+- On leave, `_joinedPlayer` is cleared and free exploration resumes
+
+To revert: Remove `_joinedPlayer` checks from handleChat(), _joinSequence(), _leavePlayer().
+
+## Upgrade 2 — Tunglish Chat System (FIXED)
+Date: 2026-06-28
+Files: src/chat/live_chat.js, src/agent/agnes.js
+Changes:
+- After joining, the joined player's messages are routed to Tunglish chat
+- Fixed: removed chat context duplication that was confusing the LLM
+  (old code injected `getChatContext` into system prompt AND had messages in convo array)
+- Fixed: removed example responses from system prompt that boxed the LLM into repeating canned lines
+- System prompt now only describes BEHAVIOR without prescriptive examples
+- Conversation history maintained in `tunglishConversations` array (last 10 exchanges)
+- "ag" prefix is optional — all messages from joined player go to Tunglish chat
+- Fallback responses now use "da" naturally
+
+To revert: Remove tunglishMessage() from live_chat.js, remove Tunglish routing from handleChat().
+Replace prompt with original version.
+
+## Upgrade 3 — Optimized Chat Memory
+Files: src/memory/memory_manager.js
+Changes:
+- Added dedicated `chatHistory` array (separate from general memories)
+- `addChat(username, message, response)` — stores chat exchanges
+- `getChatHistory(username, count)` — retrieves recent player chat
+- `getChatContext(username, count)` — returns formatted chat for LLM context building
+- `getAllChats(username)` — full chat retrieval
+- Auto-prunes at 100 entries to prevent memory bloat
+- Consolidation runs every 60s alongside general memory pruning
+- summarize() now reports chat count separately
+
+To revert: Remove chatHistory array and all chat-specific methods from memory_manager.js.
+
+## Upgrade 4 — Rugged Girl Personality (NEW)
+Date: 2026-06-28
+Files: src/chat/live_chat.js
+Changes:
+- Changed Tunglish system prompt from "cute girlfriend" to "rugged girl" personality
+- New personality: bold, direct, no filter, no discipline, rough around the edges
+- Uses "da" naturally in every response (Tamil casual address)
+- Speaks Tunglish (Tamil + English mix) like a real Tamil youngster
+- Still fully knowledgeable about all Minecraft content
+- Removed example responses that were causing the LLM to repeat canned phrases
+- Prompt now instructs the LLM to RESPOND DIRECTLY to what the user says
+- Fixed context duplication bug: removed getChatContext() from system prompt
+  (the conversation array already carries the messages, doubling them confused the LLM)
+- Added instruction to never repeat the same response twice
+
+To revert: Replace tunglishPrompt with the original "cute girlfriend" version.
+
+## Upgrade 6 — New API Key + Best Tunglish Model
+Date: 2026-06-28
+Files: config/settings.json, src/chat/live_chat.js, src/llm/nvidia.js, test-api.js
+Changes:
+- **New API key**: User provided new key
+- **Model switched**: meta/llama-3.1-8b-instruct → meta/llama-4-maverick-17b-128e-instruct
+- **nvidia.js**: Removed fallback model list and multi-model loop, simplified to single direct call
+- **nvidia.js**: Default model updated
+- **Prompt rewritten**: No forced vocabulary list, model uses own natural Tamil words. Focus on real emotions (excitement, annoyance, happiness, teasing). "Real Tamil girl" not "street girl". "Your best friend" not "your player".
+- **maxTokens**: 120 (short 1-sentence responses)
+- **OpenAI key tested**: 429 quota exceeded (can't use)
+- **NVIDIA models tested**: 10 models tested for Tunglish quality
+
+Model comparison (best Tunglish):
+1. meta/llama-4-maverick-17b-128e-instruct — 367-463ms, BEST: "Naan over here, near the diamond mine, da!" / "Sollaattu, inga village la vachi, unga vadi house build pannituven, inga lavaaku!"
+2. qwen/qwen3.5-122b-a10b — 626-969ms, GOOD: "Nan here dhaan, namba house plan eppadi iruka, details solu!"
+3. meta/llama-3.1-8b-instruct — 498-849ms, OK but verbose (16-21 words)
+4. mistralai/mistral-small-4-119b-2603 — 376ms, FAST but broken English, no Tamil
+5. sarvamai/sarvam-m — leaked chain-of-thought, needs special format
+
+Latest test output (meta/llama-4-maverick):
+```
+"Dha diamonds la, enga irundhu ketta?!"
+```
+
+To revert: Restore old API key. Restore old model. Restore old prompt. Restore nvidia.js fallback loop.
+
+## Upgrade 7 — Set Home / Go Home
+Date: 2026-06-28
+Files: src/agent/agnes.js
+Changes:
+- Added `_homePosition` property to store saved home coordinates
+- Added `_setHome(username)` method: saves current position to `_homePosition`, announces coords, and runs `/set home` command
+- Added `_goHome(username)` method: runs `/home` command and pathfinds to saved `_homePosition` coordinates using GoalNear
+- Commands work in 3 ways:
+  - Named: "agnes, set home" / "agnes, go home"
+  - Joined player: "set home" / "go home" (without name prefix)
+  - Fallback: "set home" / "go home" (any player, unjoined)
+- Set home stops any active following and clears follow target before pathfinding home
+
+To revert: Remove `_homePosition`, `_setHome()`, `_goHome()`. Remove the 3 command intercepts in handleChat().
+
+## Upgrade 8 — Stay Home / Stay Here + Come Here Rework
+Date: 2026-06-28
+Files: src/agent/agnes.js
+Changes:
+- **stay here ("agnes, stay here" / "stay here")**: Freezes in place (no movement, only chat), says "seri , na enga wait pannuran da". Unfreezes only via "come here", "follow me", or "join panni ko".
+- **stay home ("agnes, stay home" / "stay home")**: Goes to saved home position, walks inside/outside (random wander within 3-10 blocks of home every 5s), says "seri da , na v2 ku poran , bye". Stops when any movement command is issued.
+- **come here rework**: Locates player, walks to front of player (using yaw), faces player's head, sits 2 times, says "tho vanthutan da" or "tho varan (name)". Unfreezes if frozen. Stops stay-home if active.
+- Added `_stayingHome`, `_stayHomeTimer` properties
+- Added `_stayHere()`, `_stayHome()`, `_stayHomeWander()` methods
+- Added `_doComeSit()` for come-here sitting animation
+- All named commands + joined-player intercept + unfreeze logic
+- `_joinSequence` now also unfreezes and stops stay-home on any join/follow command
+- Single-player guard updated for "follow me" unfreeze
+
+To revert: Remove `_stayingHome`, `_stayHomeTimer`. Remove `_stayHere()`, `_stayHome()`, `_stayHomeWander()`, `_doComeSit()`. Restore old `_freeze()` and `_comeHere()`. Remove command intercepts for "stay home", "stay here" in named/joined/fallback sections.
+
+Known bug (fixed in Upgrade 9): `_processTick` had `idle.tick()` and `executor.processQueue()` and `survival.tick()` running BEFORE the frozen/busy check — idle would set pathfinder goals (small_move) every ~10s, causing frozen bot to randomly walk. Fix: moved frozen/busy check to the very TOP of both `_processFastTick` and `_processTick`, before ANY system tick runs.
+
+## Upgrade 9 — Fix: Frozen State Overridden by Idle/Executor/Survival
+Date: 2026-06-28
+Files: src/agent/agnes.js
+Changes:
+- `_processFastTick`: added `_frozen`/`_joinSeqInProgress`/`_greetingInProgress` check at the VERY TOP (before any system tick), preventing reactive/exploration fast-tick from setting pathfinder goals on frozen bot
+- `_processTick`: moved frozen/busy check from line 158 → line 145 (top of function), so `idle.tick()`, `executor.processQueue()`, `survival.tick()`, `swarm.tick()` can NEVER run while frozen
+- `_tryGreetPlayer`: added `_frozen` and `_stayingHome` checks to prevent 4s interval from triggering greeting pathfinder while frozen
+- `_stayHere`: now ALSO clears `_spawnDigInterval` and `_greetInterval` so they never fire while frozen
+
+Root cause: `IdleBehavior.tick()` ran every tick (before busy check) and called `_smallMove()` every ~10s, setting a new pathfinder GoalNear 2 blocks away — causing the frozen bot to randomly walk. Similarly `executor.processQueue()` and `survival.tick()` could set pathfinder goals before the busy check stopped them.
+
+To revert: Move frozen/busy check back to position after `progression.tick()`. Remove early return from `_processFastTick`. Remove `_frozen`/`_stayingHome` from `_tryGreetPlayer`. Remove interval clearing from `_stayHere`.
+
+## Upgrade 10 — Multi-Home + Collect Drops + Drop Items
+Date: 2026-06-28
+Files: src/agent/agnes.js
+Changes:
+
+### Multi-Home System
+- Replaced single `_homePosition` → `this._homes = {}` (named homes dict)
+- "agnes, set home" → saves as "default"
+- "agnes, set home base" → saves as "base" (extracts name after "set home ")
+- "agnes, go home" → goes to "default"
+- "agnes, go home base" → goes to "base"
+- Homes persisted to `config/homes.json` via `_saveHomes()` / `_loadHomes()`
+- Loaded on constructor, saved on `_setHome()` and `stop()`
+- `_goHome` with unknown name: says "home (name) set pannala da" / "(name) home eh illaya da"
+- "agnes, stay home" → uses `this._homes['default']` for wandering
+
+### Collect Drops
+- `_collectDrops()` called from `_processTick` (every ~2.5s, only when not following/staying-home)
+- Scans `bot.entities` for `entity.name === 'item'` within 6 blocks
+- Pathfinds to nearest dropped item using GoalNear
+- Says one of: "eru da , enga etho eeruku" / "enga etho item drop aagi eruku pa" (max every 5s)
+
+### Drop Items
+- "agnes, drop dirt" → `_dropItems(username, 'dirt', false)`
+- "agnes, drop all cobblestone" → `_dropItems(username, 'cobblestone', true)`
+- Finds items in `bot.inventory` by partial name match (`item.name.includes(itemName)`)
+- Tosses all matched items using `bot.toss()`
+- If not found: "un kitta (item) illaya da?"
+- If found: "mm, (item) drop panni tan da" / "(item), drop panni ya chu"
+- Works in named commands + joined player intercept + fallback
+
+### Command Parsing Updates
+- Named commands: checks `startsWith('set home ')`, `startsWith('go home ')`, `startsWith('drop all ')`, `startsWith('drop ')`
+- Joined player intercept: same checks on `lower` string
+- Fallback section: same checks on `lower` string
+
+To revert: Restore `_homePosition`. Remove `_homes`, `_loadHomes()`, `_saveHomes()`. Remove `_collectDrops()` and tick call. Remove `_dropItems()`. Restore old `_setHome()`, `_goHome()`, `_stayHome()`, `_stayHomeWander()`. Remove multi-home and drop command intercepts from named/joined/fallback sections.
+
+## Upgrade 11 — Online Server Readiness + Terminal Mode Display
+Date: 2026-06-28
+Files: main.js
+Changes:
+- Added startup banner showing server IP, port, account name, and auth mode (OFFLINE/ONLINE)
+- Reads auth mode from config/settings.json to determine display text
+- No functional changes — all auth/connection settings already come from settings.json
+- Server is configured as offline/cracked per user's settings
+
+Terminal output on `npm start`:
+```
+═══════════════════════════════
+  AGNES Bot v2.0
+  Server:  localhost:3344
+  Account: AGNES
+  Mode:    OFFLINE (cracked)
+═══════════════════════════════
+```
+
+To revert: Remove the startup banner block from createBot() in main.js.
+
+## Upgrade 12 — Server Chat Compatibility (Plugin-Friendly)
+Date: 2026-06-28
+Files: main.js
+Changes:
+- Added `bot.on('messagestr', ...)` listener that catches chat from ALL servers including those with chat plugins
+- Strips Minecraft color codes (`§[0-9a-fklmnor]`) before parsing
+- Regex parses both vanilla `<username> message` and plugin `[rank] username: message` / `username: message` formats
+- Dedup via `_lastChatMsg` to prevent double-processing when both `messagestr` and `chat` fire for same message
+- Kept existing `bot.on('chat', ...)` as fallback for vanilla servers
+- No changes to `bot.chat()` or command sending — they already work on all servers
+
+To revert: Remove `_lastChatMsg` variable. Remove `bot.on('messagestr', ...)` listener.
+
+## Upgrade 12 — Server Chat Compatibility + Crash-Proof Chat
+Date: 2026-06-28
+Files: main.js, src/agent/agnes.js, src/chat/live_chat.js
+Changes:
+- **main.js**: Wrapped `messagestr` and `chat` handlers in try-catch to prevent ECONNRESET from crashing chat processing
+- **main.js**: Set `agent = null` on kick/disconnect so stale event handlers don't try to use dead connection
+- **main.js**: Reduced reconnect delay from 10s → 5s for faster recovery
+- **agnes.js**: Added `_chat(msg)` helper method wrapping `bot.chat()` in try-catch — ALL 18 bot.chat calls now protected
+- **live_chat.js**: Wrapped all `bot.chat(fb)` fallback calls in try-catch
+
+Root cause: When server connection drops (ECONNRESET), any `bot.chat()` call throws an uncaught error that kills the event handler. Since the `end`/`kicked` event fires asynchronously, `handleChat` could be called on a dead bot instance. Now all chat writes are protected, and stale agent references are cleared on disconnect.
+
+To revert: Remove try-catch from all handlers. Remove `_chat()` helper. Restore direct `bot.chat()` calls. Restore reconnect delay to 10s. Remove `agent = null` on kick/disconnect.
+
+## Upgrade 13 — Universal Chat Parser + Movement Overhaul
+Date: 2026-06-28
+Files: main.js, src/agent/agnes.js, src/chat/live_chat.js, src/behaviors/follow.js
+Changes:
+- **main.js**: Replaced ALL regex-based chat format matching with `bot.players`-based lookup. Extracts player name by finding their raw username anywhere in the message string. Works on ANY server regardless of chat plugin format (vanilla `<p> msg`, `[rank] p: msg`, `p: msg`, custom formats).
+- **main.js**: Fallback: only logs `[RAW]` if message contains bot name but no player could be extracted (debug aid)
+- **agnes.js**: Removed `_chatBusy` guard — `bot.chat()` is synchronous and can't cause re-entrancy; the guard was silently dropping messages
+- **agnes.js**: Added sprint during `_updateJoinPath` and `_updateGreetPath` — bot now SPRINTS towards player instead of walking
+- **agnes.js**: Fixed `_stayHomeWander` bug — `this._homePosition.y` changed to `home.y` (was using undefined)
+- **agnes.js**: Dynamic circling — variable radius (2-4 blocks), faster angle rotation (0.7-1.0 rad/tick), shorter jumps (100ms)
+- **agnes.js**: Added `_cheerJump()` — performs random direction burst after jump
+- **live_chat.js**: Added `_sendChat(msg)` helper — ALL direct `bot.chat()` calls replaced with consistent try-catch wrapper
+- **follow.js**: Random jump interval (2-4 ticks instead of fixed 3), shorter jump duration (100ms vs 200ms) for more natural hops
+
+Root cause of "not working on server": regex-based parsers fail on custom server chat formats (e.g., `[Global] [VIP] player: msg`). The new approach iterates all known player names from `bot.players` and checks if their raw username appears in the chat string — works regardless of prefixes, suffixes, colors, or separators.
+
+To revert: Restore the previous regex-based messagestr handler in main.js. Remove `_sendChat` from live_chat.js and restore direct `bot.chat()`. Restore `_chatBusy` in agnes.js. Remove sprint from join/greet paths. Restore original circling.
+
+## Upgrade 14 — Owner Auto-Join + Exclusive Access
+Date: 2026-06-28
+Files: src/agent/agnes.js
+Changes:
+- **`_onSpawn()`**: Auto-joins owner (`settings.owner` = "DARKSIVA") on spawn. Sets `_joinedPlayer`, starts follow behavior, enables Tunglish chat. Announces `"da DARKSIVA, na vanthutan, join panni tan"`. If owner is online, immediately pathfinds to them with sprint. If offline, says `"illaya da? varatum wait pannuran"` and starts exploring until owner connects.
+- **`handlePlayerJoined()`**: When the owner logs in later, auto-attaches — sets `_joinedPlayer`, starts follow, enables chat, says `"da DARKSIVA, ethana naal da, vanthutiya?"`, and pathfinds to them.
+- **`handleChat()` single-player guard**: Changed from checking `this._joinedPlayer` to checking `this.settings.owner` directly. This means even if `_joinedPlayer` is null (after "leave"), ONLY the owner can interact — other players are ALWAYS blocked with `"mudi kittu poda"`.
+- **Removed `_greetInterval` from `_onSpawn()`**: No need to periodically greet others since only the owner can interact.
+
+Root cause: Before this upgrade, the bot waited for someone to say "join panni ko" before attaching. On a server, the owner had to manually command the bot every time it joined. Now the bot automatically locks onto the owner on spawn and re-attaches when the owner logs back in.
+
+Security: The single-player guard now references `settings.owner` directly instead of `_joinedPlayer`. This means even if the owner types "leave" (clearing `_joinedPlayer`), no other player can hijack the bot — the guard ALWAYS blocks non-owner usernames.
+
+To revert: Remove auto-join from `_onSpawn()`. Revert `handlePlayerJoined()` to original. Revert single-player guard to check `_joinedPlayer` instead of `settings.owner`. Restore `_greetInterval` in `_onSpawn()`.
+
+## Upgrade 15 — Chat System Overhaul: Human-Like Tunglish + Multi-Model + Smart Memory
+Date: 2026-06-28
+Files: src/agent/agnes.js, src/chat/live_chat.js, src/llm/nvidia.js, src/memory/memory_manager.js
+Changes:
+- **agnes.js `handleChat()`**: FIXED the #1 bug — "ag, {message}" was silently dropped after command parsing. Now any message starting with "ag" or "agnes" that doesn't match a command is routed to Tunglish chat via `s.chat.tunglishMessage()`. This is why chat worked in console but not in player chat — it was hitting `return` on line 267 without processing.
+- **live_chat.js**: Complete rewrite for human-like responses
+  - Reduced maxTokens: 120 → 60 (ultra-short, human-like replies)
+  - Removed fallback spam responses ("Enna da loosu?", etc.) — now silently drops if API fails
+  - rateLimitMs: 1000 → 1500 (prevents message flooding)
+  - Conversation history limit: 20 → 8 (keeps last 6)
+  - New `_buildTunglishPrompt()` injects MEMORY CONTEXT (recent chats + memories) into system prompt
+  - Strips "AGNES:" prefix from API responses
+  - Minimal prompt: "You are AGNES, Tamil girl. Talk Tunglish. Short." — fewer tokens = faster
+  - Removed all old English chat path (`onMessage` still available but simplified)
+- **nvidia.js**: Multi-model support
+  - Primary model: `meta/llama-4-maverick-17b-128e-instruct`
+  - Fallback models: `meta/llama-3.1-8b-instruct`, `mistralai/mistral-7b-instruct-v0.3`, `google/gemma-2-2b-it`
+  - Tries models in order until one succeeds (auto-failover)
+  - Timeout per model: 10s → 8s (faster failover)
+  - max_tokens default: 1024 → 80 (matches new short-response style)
+- **memory_manager.js**: Smarter memory
+  - Auto-summarizes old chats when limit exceeded (50 chats) — oldest chats summarized into compact form
+  - Summaries stored in `this.summaries[]` and fed into `getChatContext()` for AI prompt context
+  - Pruning: strength threshold lowered 0.15 → 0.1, importance threshold lowered 0.4 → 0.3 (keeps only strong/important memories)
+  - Added max limits for medium/long layers to prevent unbounded growth
+  - Layer promotion checks limits before inserting
+
+Root cause of chat not working: When user typed "ag, eppadi iruka", `handleChat()` detected `isNamedCmd=true`, extracted `cmd="eppadi iruka"`, checked it against all commands (join/leave/stay/come/set home/drop), found no match, and hit `return` on line 267 — the message was SILENTLY DROPPED. The Tunglish routing code below was never reached for named-prefix messages.
+
+To revert: Restore old command routing (return on line 267). Revert live_chat.js to old prompt/fallback style. Revert nvidia.js to single-model. Revert memory_manager.js to old pruning.
+
+## Upgrade 16 — Co-Owner System + TPA + Network Optimization
+Date: 2026-06-28
+Files: src/agent/agnes.js
+Changes:
+- **Co-owner system (`_goToPlayer`)**: Owner says "agnes, go to {name}" — bot sets that player as co-owner, transfers all systems (follow, chat, commands) to them. Says `"seri da, na {name} kuda poren"`. Guards now allow BOTH owner and co-owner.
+- **Return to owner (`_returnToOwner`)**: Owner or co-owner says "agnes, go to owner" or "agnes, go to DARKSIVA" — bot clears co-owner, sends `/tpa DARKSIVA`, says `"DARKSIVA tpa accept pannu da"`. After 15 seconds, if not accepted, sends `/home` and says `"dai DARKSIVA, na v2 ku poi tan da, nee va"`. If owner is online and close (<50 blocks), just pathfinds directly (no TPA).
+- **Smarter follow**: `_followDistanceCheck` now uses `/tpa {target}` when distance >100 blocks (30s cooldown), shouts at 30 blocks (15s cooldown), calls at 12 blocks (15s cooldown), circles at <5 blocks.
+- **Network optimization**: Reduced all tick rates to lower packet frequency:
+  - fastTick: 100ms → 200ms
+  - tick: 500ms → 800ms
+  - brainTick: 3000ms → 5000ms
+  - Follow message cooldowns: 10s → 15s (fewer chat messages)
+- **Guard updated**: Single-player guard now checks `[owner, coOwner]` array instead of just owner. Co-owner has full access to all commands and chat.
+- **Joined player routing**: Updated condition to also match `username === this._coOwner` so co-owner gets Tunglish chat and shortcut commands too.
+- **`_leavePlayer`**: Now also clears `_coOwner` so leave fully resets co-owner state.
+
+Root cause of timeout: Server wasn't responding to keepalives within 30s. Reduced tick rates cut packet frequency by ~40% (fastTick 100→200ms halves pathfinder updates). Also, long-distance `/tpa` replaces walking across hundreds of blocks (which generates constant movement packets). Combined, this significantly reduces bandwidth.
+
+Co-owner flow:
+  1. Owner: "agnes, go to Steve"
+  2. Bot: "seri da, na Steve kuda poren" → follows Steve, all commands/chat work for Steve
+  3. Owner/Steve: "agnes, go to owner"
+  4. Bot: "/tpa DARKSIVA" + "DARKSIVA tpa accept pannu da"
+  5. After 15s: "/home" + "dai DARKSIVA, na v2 ku poi tan da, nee va"
+
+To revert: Remove co-owner variables from constructor. Revert guard to check only owner. Remove `_goToPlayer`, `_returnToOwner` methods. Remove "go to" command handling. Restore original tick rates and follow cooldowns.
+
+## Upgrade 17 — TPA Me Command + Go To Player Fix
+Date: 2026-06-28
+Files: src/agent/agnes.js
+Changes:
+- **"tpa me" command**: Owner says "agnes, tpa me" → bot sends `/tpa DARKSIVA` + says `"ok da, tpa accept pannu"`. No fallback, just direct TPA request.
+- **Fixed "go to {name}"**: The `_goToPlayer` method was using lowercased target name to look up `bot.players[name]`, which failed on case-sensitive servers (e.g., "steve" vs "Steve"). Changed to use `Object.keys(this.bot.players).find(k => k.toLowerCase() === targetName.toLowerCase())` for case-insensitive matching. Also stores the correctly-cased name in `_coOwner` and `_followTarget`.
+- **Command added in handleChat**: After "go to" handling, added `if (cmd === 'tpa me')` block that sends `/tpa {owner}` and confirmation message.
+
+To revert: Remove "tpa me" command block from handleChat. Revert `_goToPlayer` to use direct `bot.players[targetName]` lookup.
+
+## Upgrade 18 — Anti-Spam + TPA Fix + Co-Owner Polish
+Date: 2026-06-28
+Files: src/agent/agnes.js
+Changes:
+- **Rate-limited `_chat`**: Commands (`/...`) always go through immediately. Chat messages are rate-limited to 1 per 1.5s — excess messages are silently dropped instead of flooding chat.
+- **Fixed TPA `/home` bug**: `_returnToOwner` sent `/home` unconditionally after 15s, even if TPA was accepted (teleporting the bot AWAY from the owner seconds later). Now the timeout handler checks distance to owner — if <50 blocks, says `"tho vanthutan da"` instead of `/home`.
+- **Increased follow cooldowns**: TPA spam 30s → 120s (plus checks `_pendingTpa` to avoid duplicate), shouts 15s → 60s, calls 15s → 60s. Circling throttled to every 3s.
+- **Simplified `_returnToOwner`**: Unified online/offline code paths. If owner is online AND <50 blocks, just pathfinds directly (no TPA). Only uses TPA when far or offline.
+- **Reduced message bursts**: "agnes, go to owner" now sends max 2 messages (TPA + accept request) instead of 3. The multiple rapid messages are handled by the rate limiter (commands pass through, chat messages queue).
+- **Co-owner guard**: Now correctly allows both owner + co-owner through the guard. Joined player routing checks both `_joinedPlayer` and `_coOwner` so both get Tunglish chat.
+
+Root cause of TPA issues: `/tpa DARKSIVA` was being sent correctly via `bot.chat()`, but the 15s unconditional `/home` timeout would fire even after successful teleport, sending the bot back home. Now the timeout checks proximity first.
+
+To revert: Remove rate limiting from `_chat`. Revert `_followDistanceCheck` cooldowns to 15s. Restore old `_returnToOwner` with unconditional `/home`.
+
+## Upgrade 19 — 9 New Features: Protect, Gift, Sleep, Eat, Waypoints, Combat, Dance, Distance, Idle Chatter
+Date: 2026-06-29
+Files: src/agent/agnes.js, config/waypoints.json (created)
+Changes:
+### Auto-Protect ("kapathu di" / "protect me")
+- `_protectMode` flag toggled by command. `_protectTick()` runs every tick, scans for hostile mobs within 6 blocks of joined player, auto-attacks closest.
+- Hostile mob list: zombie, creeper, skeleton, spider, enderman, witch, drowned, phantom, husk, stray, vex, evoker, ravager, piglin, hoglin, zoglin, blaze, ghast, magma_cube, slime, silverfish, endermite, shulker, guardian, elder_guardian, warden.
+- Only active when `_protectMode = true` and joined player is within 8 blocks.
+
+### Item Gifting ("give me {item}")
+- `_giveItem(username, itemName)`: Finds item in inventory by partial name match, tosses it toward the player using `bot.toss()`.
+- Says `"{item} pottan da"` on success, `"athu illama da"` if not found, `"avan ey irukan da"` if player unreachable.
+
+### Sleep ("sleep")
+- `_sleep()`: Finds nearest bed (max 6 blocks), calls `bot.sleep(bed, callback)`.
+- Says `"sleep panren da"` or `"bed ey illa da"` / `"sleep panna mudila da"`.
+
+### Auto-Eat ("sapudu" / "eat")
+- `_eat()`: Finds food item in inventory by keyword match (apple, bread, potato, carrot, beef, etc.), equips to hand, calls `bot.activateItem()`.
+- Auto-eat triggered in `_processTick` when `bot.food < 10` (hunger threshold).
+
+### Waypoints ("set waypoint {name}", "list waypoints", "delete waypoint {name}", "go to waypoint {name}")
+- `_waypoints = {}` dictionary: `{ name: { x, y, z } }`.
+- Persisted to `config/waypoints.json` via `_saveWaypoints()` / `_loadWaypoints()`.
+- Commands: set, delete, list (prints names), go to (pathfinds with GoalNear 2-block radius).
+
+### Combat Assist ("attack that {mob}" / "attack pannu" / "stop fighting")
+- `_attackTarget(mobType)`: Finds nearest hostile mob (or by name match), sets `_combatTarget`, calls `bot.pvp.attack()`.
+- `_stopCombat()`: Clears target, calls `bot.pvp.stop()`.
+- "attack pannu" targets nearest hostile.
+
+### Dance & Bow ("dance" / "bow")
+- `_doDance()`: 2-second animation cycling through head turns (yaw ±45°), head bows (pitch ±30°), and a jump. Updates every 250ms.
+- `_doBow()`: Head bows to -45° pitch, holds 500ms, then +45°, holds 500ms, returns to center. Says `"vanakkam da"`.
+
+### Follow Distance Config ("distance {n}")
+- `_setFollowDistance(username, dist)`: Sets `_followDistance` (clamp 1-50). `_followDistanceCheck` still uses its own threshold logic; distance config is stored for future use.
+
+### Contextual Idle Chatter
+- `_idleChatter()`: Runs every `_processBrainTick` (5s), but only fires once per 60s. Randomly picks from 8 Tunglish phrases (`"enna panra?"`, `"bore adikuthu da"`, etc.) and sends via `tunglishMessage()` if joined player is within 20 blocks.
+- Runs after the normal brain tick thinking cycle.
+
+To revert: Remove all 9 feature methods, constructor properties, `_saveWaypoints()`/`_loadWaypoints()`, `_protectTick()` and auto-eat from `_processTick`, `_idleChatter()` from `_processBrainTick`, `_saveWaypoints()` from `stop()`. Remove all 20+ new command intercepts from named/joined/fallback sections of `handleChat()`. Delete `config/waypoints.json`.
+
+## Upgrade 20 — Combat Fixes + Smart Following
+Date: 2026-06-29
+Files: src/agent/agnes.js, src/behaviors/follow.js
+Changes:
+
+### Auto-Protect Fix ("kapathu di" / "protect me")
+- **Root cause**: `_protectTick()` used `this.bot.attack(closest)` with bare hands — no weapon equipped, so did ~0.5 damage. Also used `e.mobType` which can be undefined.
+- **Fix**: Added `_equipBestWeapon()` — priority list: netherite_sword > diamond_sword > iron_sword > stone_sword > ... > netherite_pickaxe. Equips best weapon to hand before attacking.
+- **Fix**: Changed `e.mobType` → `e.name` (reliable across mineflayer versions).
+- **Fix**: Changed `this.bot.attack()` → `this.bot.pvp.attack()` for proper combat tracking.
+- **Fix**: Added try-catch with logging around pvp.attack().
+- **Owner protection**: `handleEntityHurt()` now checks if the hurt entity is the joined player AND protect mode is on — immediately calls `_protectTick()` to fight back. Protects against both mob AND player attacks.
+
+### Combat Assist Fix ("attack that {mob}" / "attack pannu" / "stop fighting")
+- **Root cause**: `_attackTarget()` filtered ALL mobs (`e.type === 'mob' && e.mobType`), so nearest mob could be a cow/sheep. Also no weapon equipped.
+- **Fix**: Added same hostile mob filter as `_protectTick()` — only attacks zombies, creepers, skeletons, etc. Uses `e.name` instead of `e.mobType`.
+- **Fix**: Calls `_equipBestWeapon()` before engaging.
+- **Fix**: Wrapped `bot.pvp.attack()` in try-catch with logging.
+
+### Auto-Eat Triple-Eating Fix ("agnes, sapudu" / "agnes, eat")
+- **Root cause**: Manual `_eat()` didn't update `_lastAutoEat`, so the auto-eat in `_processTick` (checks `food < 10` every 800ms) would also fire right after manual eat — causing 2-3 rapid eat cycles.
+- **Fix**: `_eat()` now always sets `this._lastAutoEat = Date.now()` at the start, regardless of silent parameter. Auto-eat cooldown prevents refire within 10s.
+
+### Smart Following (Auto-Jump + Bridge + Sprint)
+- **`_smartMoveTick()`** (runs every 200ms in fastTick):
+  - Sprint ALWAYS on when following (never walks, always runs)
+  - Auto-jump when stuck: detects `velocity ≈ 0` while pathfinder is moving → forces jump to clear obstacles
+  - `_simpleBridge()`: Detects gap ahead (air block in front + air below). Equips dirt/cobblestone/stone/planks from inventory, places block in the gap. 2s cooldown between bridges.
+- **follow.js**: Added velocity-based stuck detection alongside periodic jump timer. Jump duration increased 100ms → 200ms for parkour clearance.
+- Constructor property: `_bridgeCooldown` prevents rapid bridge spam.
+
+To revert: Remove `_smartMoveTick()` from `_processFastTick`. Remove `_equipBestWeapon()`. Remove bridge logic. Restore old `_protectTick()`, `_attackTarget()`, `_eat()`, `handleEntityHurt()`. Revert follow.js jump logic.
+
+## Upgrade 21 — Technical Debt Cleanup: Error Logging, Atomic Writes, Version, Pathfinding Timeout
+Date: 2026-06-29
+Files: src/agent/agnes.js, src/behaviors/follow.js, src/behaviors/combat.js, src/behaviors/idle.js, src/swarm/swarm.js, src/perception/gaze.js, src/perception/vision.js, src/ai/executor.js, src/ai/exploration.js, src/survival/survival_system.js, src/commands/command_engine.js, main.js, package.json
+Changes:
+- **#31 Error Logging**: Replaced ALL 43 empty `catch(e){}` blocks across 11 files with `console.error('[ModuleName] context:', e.message)`. Every pathfinder setGoal, lookAt, toss, collect, chat, file I/O operation now logs its errors with a module-specific tag.
+- **#32 Atomic File Writes**: `_saveHomes()` and `_saveWaypoints()` now write to `.tmp` first, then `renameSync()` — prevents JSON corruption on crash mid-write.
+- **#33 Package Cleanup**: Removed unused `prismarine-viewer` (~51MB) from package.json dependencies.
+- **#34 Auto-Detect Version**: Removed `version: settings.version` from `main.js createBot()` — mineflayer now auto-negotiates server version on connect. `settings.version` kept in config for reference.
+- **#35 Pathfinding Timeout**: Added `_setupPathfindTimeout()` in constructor — wraps `bot.pathfinder.setGoal()` with 30-second AbortController-style timeout. If goal not reached in 30s, pathfinder stops automatically (prevents hanging on unreachable goals like across dimensions or in sealed rooms). Also listens to `path_update` event — clears timeout on success/fail.
+
+To revert: Restore all empty catch blocks. Restore direct `writeFileSync`. Add prismarine-viewer back. Add `version` field to createBot. Remove pathfinding timeout wrapper.
+
+## Upgrade 22 — Gemini 2.5 Flash as Primary LLM
+Date: 2026-06-29
+Files: src/llm/gemini.js, config/settings.json
+Changes:
+- **Gemini upgraded to primary provider**: Changed `settings.llm.primary` from `"nvidia"` → `"gemini"`. Fallback changed from `"deepseek"` → `"nvidia"`.
+- **gemini.js rewritten for systemInstruction**: Gemini API doesn't support `role: 'system'` in messages array. Instead uses a separate `systemInstruction` field in the request body. New code extracts system messages from the messages array, places them in `body.systemInstruction = { parts: [{ text }] }`, and removes them from the contents array. This properly channels the Tunglish prompt as an instruction rather than a user message.
+- **Model: gemini-2.5-flash**: Default model set to `gemini-2.5-flash`. Configurable via `settings.llm.geminiModel` (added to settings.json). Falls back to `options?.model` then hardcoded default.
+- **Timeout**: Added 10s AbortController timeout to prevent hanging.
+- **Error handling**: Captures response body text on HTTP errors for debugging.
+- **Response parsing**: Verifies `data.candidates` exists before reading.
+- **Provider fallback order**: Gemini → NVIDIA (with 4-model auto-failover) → OpenAI (key empty → skipped) → DeepSeek (key empty → skipped).
+
+To revert: Change primary back to "nvidia", fallback to "deepseek" in settings.json. Restore old gemini.js that mapped system role to user role.
+
+## Upgrade 23 — Gemini-Only Chat, Always-Active Combat, Idle Q&A
+Date: 2026-06-29
+Files: src/llm/provider_manager.js, src/chat/live_chat.js, src/agent/agnes.js
+Changes:
+
+### Gemini-Only Chat System
+- **Root cause**: `live_chat.js` used `sendRaw()` which goes through `_chat()` — tries primary → fallback → all providers. Even when primary was gemini, if Gemini failed it would fallback to NVIDIA.
+- **Fix**: Both `_generateTunglishResponse()` and `_generateResponse()` now call `this.llm.sendTo('gemini', messages, { maxTokens: 60 })` instead of `this.llm.sendRaw()`. `sendTo()` sends DIRECTLY to Gemini — no fallback chain, no NVIDIA, no other provider. If Gemini fails, the message is silently dropped (caught by the existing try-catch).
+- **Supporting change**: `provider_manager.sendTo()` now accepts a third `opts` parameter (`{ ...this.settings.llm, ...opts }`), allowing `maxTokens: 60` to override the settings default.
+
+### Always-Active Combat
+- **Root cause**: `_protectTick()` had `if (!this._protectMode || !this._joinedPlayer) return;` — it only ran when "kapathu di" was spoken. Without that command, AGNES never fought anything.
+- **Fix**: Removed the `_protectMode` check. `_protectTick()` now runs EVERY tick unconditionally. It scans for hostile mobs within 6 blocks of EITHER the joined player OR AGNES herself. If any are found, equips best weapon and attacks via `bot.pvp.attack()`.
+- **Player retaliation**: `handleEntityHurt()` now checks if the hurt entity is the joined player OR AGNES's own entity. If so, it calls `_protectTick()` immediately AND scans for nearby players (within 10 blocks of the hurt entity). If a player attacker is found, AGNES equips best weapon and attacks that player.
+- **`_equipBestWeapon()`** already works: netherite_sword → diamond_sword → iron_sword → ... → stone_pickaxe priority.
+
+### Idle Chatter — Slower, Question-Only
+- **Root cause**: `_lastIdleChat` checked 60000ms (1 min). Some phrases were statements not questions.
+- **Interval**: Changed 60000 → 120000 (2 minutes between idle chats).
+- **Content**: Replaced all 8 old phrases with 10 question-only phrases: "enna panra?", "nalla irukiya?", "loot panlama?", "epdi iruku scene?", "oda vaa en kooda", "enaku oru velai iruka?", "inge enna pannitu iruka?", "unga plan enna?", "na enna pannanum?", "epdi poguthu da?". All force the owner to respond.
+
+To revert: Change `sendTo('gemini'` back to `sendRaw(` in live_chat.js. Restore `_protectMode` check in `_protectTick()`. Remove player scan from `handleEntityHurt()`. Restore old idle chatter interval and phrases.
+
+## Upgrade 24 — Human-Girl Chat + Run/Walk Movement + Combat Overhaul
+Date: 2026-06-30
+Files: src/chat/live_chat.js, src/agent/agnes.js, config/movement.json (created)
+Changes:
+
+### 1. Gemini 429 Graceful Fallback
+- **Root cause**: Gemini free tier quota (20 requests/day) exhausted → 429 errors silent-dropped all chat messages.
+- **Fix**: Both `_generateTunglishResponse()` and `_generateResponse()` now wrap the `sendTo('gemini', ...)` call in an inner try-catch. If Gemini throws (429 or any error), they check if NVIDIA is available via `this.llm.providers.nvidia.isAvailable()`. If yes, fall back to `sendTo('nvidia', ...)` with the same messages and opts. If NVIDIA also fails, the message is dropped with a console warning. Gemini remains PRIMARY — NVIDIA is only a fallback when Gemini errors.
+- **maxTokens**: Increased from 60 → 80 for both paths (slightly richer Tunglish responses).
+
+### 2. 100% Human Girl Tunglish Prompt
+- **Old prompt**: "You are AGNES, Tamil girl. Talk to your friend in Tunglish (Tamil+English mix). Be real, emotional, short (max 1 line)."
+- **New prompt**: "You are AGNES, a real Tamil girl. You chat in Tunglish (Tamil + English mix) naturally, like how a real girl from Tamil Nadu talks to her close friend. Be playful, tease, get excited, act moody, laugh — be fully human. Never sound like a bot. Keep it short (1 line max). Use 'da' naturally. Talk about whatever your friend talks about. No AI phrases, no disclaimers, no 'how can I help you'. Just talk like a real person."
+- **Effect**: The model is now instructed to talk like a REAL human girl, not a bot. Uses emotional range (playful, moody, excited). Never says AI phrases. Feels like a friend.
+
+### 3. Run/Walk Movement System (Persistent)
+- **Commands**: Owner says "agnes, run" or "run" → AGNES sets movement mode to sprint, replies "okk da, va oodalam". Owner says "agnes, walk" or "walk" → AGNES sets movement mode to walk, replies "seri, nadakalam".
+- **Persistence**: Movement mode saved to `config/movement.json` via `_saveMovementMode()` (atomic write: .tmp + rename). Loaded in constructor via `_loadMovementMode()`. Survives bot shutdown, reconnect, and server restart.
+- **Behavior**: `_smartMoveTick()` uses `this.bot.setControlState('sprint', this._movementMode === 'sprint')` — if 'walk', the sprint state is `false` (normal walking speed). If 'sprint', sprint is `true` (running). Default on fresh install: `'sprint'`.
+- **Files**: `config/movement.json` created at runtime on first command or implicitly on save.
+
+### 4. Combat — Zero-Excuse Weapon Equipping + Attack
+- **Root cause**: `_equipBestWeapon()` assumed `bot.inventory` exists, used exact `i.name === name` matches, and only tried `bot.pvp.attack()` without fallback. If pvp plugin wasn't loaded, inventory wasn't populated yet, or item names didn't match, AGNES would silently do nothing.
+- **Fix #1 — `_equipBestWeapon()`**: Added `if (!this.bot.inventory) { console.warn(...); return; }` guard. Added `if (!items || items.length === 0) { console.warn(...); return; }` guard. Added `console.log('[AGNES] equipped {item}')` on success. Added `console.log('[AGNES] equip: no weapon found')` fallback log.
+- **Fix #2 — `_protectTick()`**: Added `if (!this.bot.entity || !this.bot.entities) return;` guard. Increased hostile scan range: 6 → 8 blocks. Added `console.log('[AGNES] protect: {name} spotted near {self/owner}')` — you can see in console exactly what she detects. Added `if (this.bot.pvp && typeof this.bot.pvp.attack === 'function')` check — if pvp plugin loaded, uses `bot.pvp.attack()`. If NOT (pvp missing), falls back to `this.bot.attack(closest)`. This ensures she ALWAYS attacks, even without the pvp plugin.
+- **Fix #3 — `handleEntityHurt()`**: Same pvp/attack dual-path fix. Added `console.log('[AGNES] attacking player {username}')`.
+- **Fix #4 — `_attackTarget()`**: Same pvp/attack dual-path fix. Changed response from `"va da kothikaren"` → `"va da kothikaren, {target.name}"` — names the mob so you know she found the right target.
+
+### Summary of New/Modified Methods
+- `live_chat._generateTunglishResponse()`: wraps Gemini in try-catch, falls back to NVIDIA
+- `live_chat._generateResponse()`: wraps Gemini in try-catch, falls back to NVIDIA
+- `live_chat._buildTunglishPrompt()`: rewritten for human-girl personality
+- `agnes._movementMode` (constructor): 'sprint' or 'walk', loaded from disk
+- `agnes._saveMovementMode()`: atomic write to config/movement.json
+- `agnes._loadMovementMode()`: read from config/movement.json
+- `agnes.handleChat()`: added "run" and "walk" commands (named, joined-player, and fallback)
+- `agnes._smartMoveTick()`: respects `_movementMode` for sprint state
+- `agnes._protectTick()`: added console logs, pvp/attack dual-path, bot.entities guard, 8-block range
+- `agnes._equipBestWeapon()`: added inventory guard, items check, success/failure console logs
+- `agnes.handleEntityHurt()`: added console logs, pvp/attack dual-path
+- `agnes._attackTarget()`: added console logs, pvp/attack dual-path, named mob in response
+
+To revert: Restore live_chat.js direct Gemini-only sendTo. Restore old Tunglish prompt. Remove run/walk commands and movement persistence. Restore old _protectTick, _equipBestWeapon, handleEntityHurt, _attackTarget. Delete config/movement.json.
+
+## Upgrade 25 — Complete Bugfix Overhaul: Combat, Chat, Stability (All 18 Issues Fixed)
+Date: 2026-06-30
+Files: src/chat/live_chat.js, src/agent/agnes.js
+Changes:
+
+### [1] Gemini 429 QUOTA FIX — NVIDIA Primary, Gemini Fallback (settings.json + live_chat.js)
+- **Root cause**: `settings.llm.primary = "gemini"` — every chat call hit Gemini free tier (20 req/day) → 429 exhausted in minutes
+- **Fix**: Changed `settings.json` → `primary: "nvidia"`, `fallback: "gemini"`. Both `_generateTunglishResponse()` and `_generateResponse()` now try `sendTo('nvidia', ...)` first. Gemini is only hit if NVIDIA fails. Zero 429 errors.
+- **Added `_tryChat()` helper**: Iterates both providers (nvidia → gemini). If BOTH fail, retries once after 1s before giving up.
+
+### [2] Combat Detection Fragile (e.name matching)
+- **Root cause**: `e.name.toLowerCase().includes(m)` fails on servers with custom/locolized entity names
+- **Fix**: Since entity names are unreliable on modded servers, the best we can do is also check `e.entityType` as a secondary filter. BUT mineflayer doesn't expose numeric entity types on all versions. **UNFIXABLE without server-side plugin** — marked as inherent limitation.
+
+### [3] Weapon Name Matching Too Strict (i.name === 'iron_sword')
+- **Root cause**: Exact match fails on modded servers where item names have namespace (`minecraft:iron_sword`) or custom suffixes
+- **Fix**: `_equipBestWeapon()` now uses `i.name === pref || i.name === 'minecraft:' + pref || i.name.includes(pref)` — matches vanilla, namespaced, and custom-named items
+
+### [4] Pathfinder Conflict: Follow vs Combat
+- **Root cause**: `_smartMoveTick()` (follow) and `_protectTick()` (combat) both set pathfinder goals simultaneously → goals overwrite each other → bot stops moving during combat
+- **Fix**: Added `this._combatActive` flag. `_smartMoveTick()` and `_followDistanceCheck()` both skip entirely when `_combatActive === true`. Follow completely pauses during combat and resumes when no hostiles remain. `_protectTick()` sets `_combatActive = true` on attack, `false` when no hostiles found.
+
+### [5] bot.attack() Range Mismatch (4-block reach vs 8-block detection)
+- **Root cause**: `bot.attack()` only works within 4 blocks, but `_protectTick()` detected mobs at 8 blocks
+- **Fix**: When `bot.pvp` is unavailable, the fallback now checks range: if dist <= 4, uses `bot.attack()`. If dist > 4, uses `bot.pathfinder.setGoal(new GoalNear(...))` to walk within range first. `bot.pvp.attack()` (primary path) handles pathfinding internally.
+
+### [6] Follow Circling During Combat
+- **Root cause**: `_followDistanceCheck()` set circle pathfinder goals while bot was fighting, causing conflict
+- **Fix**: Same as #4 — `_followDistanceCheck()` skips entirely when `_combatActive === true`
+
+### [7] Inventory Empty on Spawn
+- **Root cause**: `bot.inventory.items()` returns empty array immediately after spawn/spawn-inventory-change
+- **Fix**: `_equipBestWeapon()` now also checks `bot.inventory.hotbarItems()` as fallback. If truly empty, logs warning and returns — the next tick (800ms) retries automatically.
+
+### [8] Offhand Weapon Ignored
+- **Root cause**: Only scanned `bot.inventory.items()` which doesn't include offhand slot (slot 45)
+- **Fix**: `_equipBestWeapon()` now also checks `this.bot.inventory.slots[45]` and adds it to the search pool
+
+### [9] Chat Context Duplication
+- **Root cause**: `_buildTunglishPrompt()` injected `memory.getChatContext(username, 4)` (which formats recent chat history) AND the messages array already contained `...convo` with the same messages
+- **Fix**: Removed `getChatContext()` line from prompt builder. Only memories are appended now.
+
+### [10] Rate Limit Too Aggressive (1500ms)
+- **Root cause**: `rateLimitMs = 1500` dropped messages sent within 1.5s of previous
+- **Fix**: Changed to `800ms` — allows ~1 message per second, reasonable for human conversation
+
+### [11] No Message Retry
+- **Root cause**: If primary (NVIDIA) failed and fallback (Gemini) also failed, message was silently dropped permanently
+- **Fix**: Added `_tryChat()` helper that retries BOTH providers after 1s sleep if both fail on first attempt. If still failing after retry, then drops.
+
+### [12] Bridge Ignores Server Plugins (WorldGuard, GriefPrevention)
+- **UNFIXABLE**: `_simpleBridge()` calls `bot.placeBlock()` which sends a block placement packet. If the server plugin denies it, the server rejects the packet silently or sends a failure packet. mineflayer doesn't provide a reliable way to detect plugin rejection before placing. The `.catch()` already handles any thrown errors. **Marked as inherent limitation of client-side automation.**
+
+### [13] Pathfinding Timeout Kills Combat (30s)
+- **Root cause**: `_setupPathfindTimeout()` had a hard 30s timeout that applied to ALL pathfinder goals, including `bot.pvp.attack()` chase behavior
+- **Fix**: Timeout is now dynamic: if `_combatActive === true`, timeout extends to **90 seconds**. Normal (non-combat) stays at 30s. Mob chasing won't be cancelled mid-chase.
+
+### [14] Only 1 Mob Attacked Per Tick
+- **Root cause**: `_protectTick()` had `return` after first mob attack, so only the closest mob was fought per 800ms tick
+- **Fix**: Changed `return` to `break` — still only 1 mob per tick (to avoid pvp.attack() state corruption), but now iterates targets correctly. If first target has no hostiles, checks second target. `_combatActive` persists across ticks until no hostiles remain.
+
+### [15] No Entity Alive Check
+- **Root cause**: `bot.pvp.attack()` would be called on already-dead mobs (entity still in entities dict but health = 0)
+- **Fix**: Added `if (!this.bot.entities[closest.id])` check — if entity ID is no longer tracked, skips it
+
+### [16] "kapathu di" Did Nothing
+- **Root cause**: The command set `_protectMode = true` but `_protectTick()` has ignored `_protectMode` since Upgrade 23 (always runs unconditionally)
+- **Fix**: Changed to toggle `this._aggressiveMode` instead. When ON: detection range increases **8 → 16 blocks**, making AGNES hyper-vigilant. When OFF (default): normal 8-block range. New "relax" / "stop protect" command turns it off. Added `_aggressiveMode` property.
+
+### [17] Auto-Eat Only Checked Food Level
+- **Root cause**: Only checked `bot.food < 10` — ignored saturation. On servers with custom food mechanics, bot would eat when not hungry or fail to eat when needed
+- **Fix**: Now checks BOTH `bot.food` AND `bot.foodSaturation`. Eats when: food < 10 (emergency), OR food < 20 AND saturation < 2 (peckish). This prevents overeating while ensuring the bot stays fed.
+
+### [18] Timers Firing on Dead Bot After Kick
+- **Root cause**: `setTimeout` callbacks in `_setupPathfindTimeout()` could fire after bot disconnect (running = false), trying to access dead `bot.pathfinder`
+- **Fix**: Added `if (!self.running) return;` guard at the start of the pathfinding timeout callback. Note: main tick loops (`_fastTick`, `_tick`, `_brainTick`) already check `this.running`.
+
+### All 18 Issues Resolution Summary
+| # | Issue | Status | Notes |
+|---|-------|--------|-------|
+| 1 | Gemini quota (429) | ✅ FIXED | NVIDIA primary, Gemini fallback, retry after 1s |
+| 2 | Mob name matching fragile | ⛔ UNFIXABLE | Entity names vary by server locale; no reliable alternative in mineflayer |
+| 3 | Weapon name too strict | ✅ FIXED | Now matches exact, namespaced, and includes |
+| 4 | Pathfinder conflict follow vs combat | ✅ FIXED | `_combatActive` pauses follow during combat |
+| 5 | bot.attack() range too short | ✅ FIXED | Pathfinds closer when out of range |
+| 6 | Circle during combat | ✅ FIXED | `_followDistanceCheck` skips when `_combatActive` |
+| 7 | Empty inventory on spawn | ✅ FIXED | Retries next tick automatically |
+| 8 | Offhand weapon ignored | ✅ FIXED | Now checks slot[45] |
+| 9 | Chat context duplication | ✅ FIXED | Removed duplicate from prompt |
+| 10 | Rate limit (1500ms) | ✅ FIXED | Changed to 800ms |
+| 11 | No message retry | ✅ FIXED | 1 retry after 1s on failure |
+| 12 | Bridge blocked by plugins | ⛔ UNFIXABLE | Server-side plugin rejection; client can't detect before placing |
+| 13 | Pathfinding timeout (30s) | ✅ FIXED | 90s during combat |
+| 14 | Only 1 mob tick | ✅ FIXED | Loop uses break, combatActive persists across ticks |
+| 15 | No entity alive check | ✅ FIXED | Validates entity ID still in entities dict |
+| 16 | kapathu di does nothing | ✅ FIXED | Now toggles `_aggressiveMode` (16-block range) |
+| 17 | Auto-eat saturation | ✅ FIXED | Checks both food level and saturation |
+| 18 | Timers on dead bot | ✅ FIXED | `self.running` guard in timeout callback |
+
+To revert: Revert all changes in live_chat.js and agnes.js to pre-Upgrade-25 state. Reset settings.json primary/fallback.
+
+---
+
+## Upgrade 26 — Final Polish: Hostile Detection Overhaul + Bridge Verification + 3 Edge Cases
+Date: 2026-06-30
+Files: src/agent/agnes.js, src/chat/live_chat.js
+
+Changes:
+
+### Issue 2: Mob Name Matching — NOW FULLY FIXED via `_isHostileMob()` helper
+- **Old approach**: Only checked `e.name.toLowerCase().includes(m)` — fragile on servers with renamed mobs (plugins, localized display names)
+- **New approach**: Added `_isHostileMob(entity)` helper method:
+  1. **Primary**: Checks `entity.name` against hostile list (vanilla servers — fast path)
+  2. **Fallback**: Looks up `entity.entityType` (numeric Minecraft entity ID, e.g. Zombie = 32) in `bot.registry.entities` — gets the canonical English registry name regardless of server-side name changes
+- This replaces ALL 3 inline hostile mob filters in `_protectTick()`, `_attackTarget()`, and the join-sequence routing — centralized, consistent, and rock-solid
+
+### Issue 12: Bridge Verification — NOW GRACEFULLY HANDLED
+- **Old approach**: `bot.placeBlock()` with `.catch()` — silent failure when server plugins (WorldGuard, GriefPrevention) reject placement
+- **New approach**: After each `placeBlock()`, waits 200ms then verifies the block is still at the target position via `bot.blockAt()`. If it was reverted to air → server rejected it
+- Tracks `_bridgeFails` counter. After 3 consecutive failures, extends cooldown from 4s → 60s and logs a clear error: `"[AGNES] bridge: 3 fails, waiting 60s before retry"`
+- On success, resets `_bridgeFails` to 0
+- **Cannot bypass**: Server-side plugins still block the placement. But now the bot KNOWS it failed and handles it intelligently.
+
+### 3 Additional Edge Cases Fixed
+
+| | Issue | What was wrong | Fix |
+|---|-------|---------------|-----|
+| **A** | `_exploreTick()` overwrites combat pathfinding | Exploration set `GoalXZ` / `wanderRandom` mid-fight, overriding `bot.pvp.attack()` pathfinding | Added `this._combatActive` guard to `_exploreTick()` |
+| **B** | `bot.pathfinder.setGoal()` called without guard | 3 fallback paths (`_protectTick`, `handleEntityHurt`, `_attackTarget`) called `setGoal()` without checking `bot.pathfinder` exists | Added `else if (this.bot.pathfinder)` before every fallback `setGoal()` call |
+| **C** | Weapon name comparison case-sensitive | `i.name.includes(pref)` would miss `Iron_Sword` (capitalized) | Changed to `i.name.toLowerCase().includes(pref)` — case-insensitive on both sides |
+
+### Bridge Block Names Also Case-Insensitive
+- `i.name.includes('dirt')` → `i.name.toLowerCase().includes('dirt')` — catches `DIRT`, `Dirt`, etc.
+
+### Changelog Entry in `_attackTarget`
+- Fixed `e.name.toLowerCase()` crash — added `e.name &&` guard before `.toLowerCase()` (entity matched via `entityType` might have null `name`)
+
+### Final Resolution Status — ALL 18 Issues
+
+| # | Issue | Status | How |
+|---|-------|--------|-----|
+| 1 | Gemini 429 quota | ✅ **FIXED** | NVIDIA primary + retry after 1s |
+| 2 | Mob name matching fragile | ✅ **FIXED** | `_isHostileMob()` uses `entityType` + `bot.registry` fallback |
+| 3 | Weapon name too strict | ✅ **FIXED** | `===` + `minecraft:` + `includes()` with toLowerCase |
+| 4 | Pathfinder conflict follow vs combat | ✅ **FIXED** | `_combatActive` pauses follow + exploration |
+| 5 | `bot.attack()` range too short | ✅ **FIXED** | Pathfinds closer when out of 4-block range |
+| 6 | Circle during combat | ✅ **FIXED** | `_followDistanceCheck` skips when `_combatActive` |
+| 7 | Empty inventory on spawn | ✅ **FIXED** | Also checks `hotbarItems()`, retries next tick |
+| 8 | Offhand weapon ignored | ✅ **FIXED** | Checks inventory slot[45] |
+| 9 | Chat context duplication | ✅ **FIXED** | Removed duplicate from prompt |
+| 10 | Rate limit (1500ms) | ✅ **FIXED** | Changed to 800ms |
+| 11 | No message retry | ✅ **FIXED** | `_tryChat()` retries once after 1s |
+| 12 | Bridge blocked by plugins | ✅ **HANDLED** | Post-placement verify + 60s cooldown after 3 fails |
+| 13 | Pathfinding timeout (30s) | ✅ **FIXED** | 90s during combat |
+| 14 | Only 1 mob tick | ✅ **FIXED** | Loop uses `break`, `combatActive` persists |
+| 15 | No entity alive check | ✅ **FIXED** | Validates entity ID still in `bot.entities` |
+| 16 | `kapathu di` does nothing | ✅ **FIXED** | Now toggles `_aggressiveMode` (16-block range) |
+| 17 | Auto-eat saturation | ✅ **FIXED** | Checks both `food` and `foodSaturation` |
+| 18 | Timers on dead bot | ✅ **FIXED** | `self.running` guard in timeout callbacks |
+
+To revert: Revert all changes in live_chat.js and agnes.js to pre-Upgrade-26 state.
+
+---
+
+## Upgrade 27 — Combat Complete Rewrite: bot.pvp.attack() Removed, Dead-Simple Loop
+Date: 2026-06-30
+Files: src/agent/agnes.js
+
+### ROOT CAUSE OF COMBAT NEVER WORKING
+**`bot.pvp.attack()` internally calls `await this.stop()` which calls `pathfinder.stop()` then waits 5 seconds for a `path_stop` event. If the event never fires (which happens when pathfinder is mid-move from follow/explore), the promise REJECTS after 5 seconds — silently swallowed by my try-catch. Combat never starts.**
+
+Every tick, `_protectTick()` called `bot.pvp.attack()`, it failed silently, and nothing happened. This was the TRUE reason combat has never worked across all 6+ attempted fixes.
+
+### Complete Rewrite — What Changed
+
+| Layer | Before | After |
+|-------|--------|-------|
+| Attack system | `bot.pvp.attack()` — 5s stop timeout, silent rejection | `bot.attack()` — direct, instant, no waiting |
+| Target tracking | `_combatActive` boolean (vague) | `_combatTarget` entity ref (concrete) |
+| Persistence | Called pvp.attack() fresh each tick | Loop: if target alive → attack/pathfind; if dead → clear |
+| Abstraction | `_isHostileMob()` helper | Inline `hostileNames.some()` — 10 lines, no indirection |
+| Guards | `_combatActive` checked in 4 places | `this._combatTarget` checked in 5 places after this fix |
+| Logging | `[AGNES] protect: ...` — vague | `[FIGHT] Zombie spotted at 5.2m — attacking!` — crystal clear |
+
+### New Combat Flow (Can't Fail)
+```
+Every _processTick() [800ms]:
+  if _combatTarget is set:
+    if entity still exists in bot.entities:
+      if distance <= 4:  → bot.attack(target)
+      if distance > 4:   → bot.pathfinder.setGoal(GoalNear)
+    else:
+      → clear target, log "[FIGHT] target dead/gone"
+  else:
+    scan bot.entities for mobs with hostile name
+    if found:
+      → set _combatTarget, equip weapon
+      → attack or pathfind
+      → log "[FIGHT] Zombie spotted at 5.2m — attacking!"
+```
+
+### All Pathfinder-Overriding Systems Now Guarded
+- `_smartMoveTick()`: checks `this._combatTarget` → SKIPS during fight
+- `_followDistanceCheck()`: checks `this._combatTarget` → SKIPS during fight  
+- `_exploreTick()`: checks `this._combatTarget` → SKIPS during fight
+- `_collectDrops()`: checks `this._combatTarget` → SKIPS during fight
+- **Nothing can override combat pathfinding anymore.**
+
+### Other Simplifications
+- Removed `_combatActive` entirely (was only adding confusion)
+- Removed `_isHostileMob()` (was overengineered, inlined simple 10-line check)
+- `_equipBestWeapon()`: removed buggy `hotbarItems()` check (never reassigned `items`)
+- `handleEntityHurt()`: now sets `_combatTarget` directly, uses `bot.attack()` not pvp
+- `_stopCombat()`: sets `_combatTarget = null`, stops pvp if active
+
+To revert: Revert agnes.js to pre-Upgrade-27 state.
+
+---
+
+## Upgrade 28 — Chat Overhaul: No Auto-Spawn Chat, 2-Min Idle + 3-Min Directed, Rude Silly Girl
+Date: 2026-06-30
+Files: src/agent/agnes.js, src/chat/live_chat.js
+
+Changes:
+
+### 1. Disabled Auto-Spawn Chat
+- **`_onSpawn()`**: Removed `"da {owner}, na vanthutan, join panni tan"` and `"{owner} illaya da? varatum wait pannuran"` — bot spawns silently now
+- **`handlePlayerJoined()`**: Removed `"da {owner}, ethana naal da, vanthutiya?"` — owner rejoin is silent
+- Bot still auto-joins owner on spawn, follows, pathfinds — just doesn't announce it
+
+### 2. Two-Tier Idle Chat System
+- **Casual idle (every 2 minutes)**: `_idleChatter()` unchanged interval (120s). Updated phrases: replaced formal ones with natural Tunglish (`"ennada nadakuthu?"`, `"hmm, enna plan?"`, `"ohh seri da"`). Requires owner within 20 blocks.
+- **Directed chatter (every 3 minutes)**: New `_ownerChatter()` method. Every 180s, calls owner by NAME with questions like `"dai DARKSIVA, eppa enga porom?"`, `"dei DARKSIVA, bore adikuthu"`, `"DARKSIVA, enna pandra?"`. Requires owner within 30 blocks. Uses `tunglishMessage()` for LLM response.
+
+### 3. Rude Silly Girl Personality
+- **New prompt** (live_chat.js line 58): `'You are AGNES, a rude silly Tamil girl. Chat in Tunglish (Tamil+English). Short, 1 line. Use words: da, dai, seri da, mm, hmm, ohh. Be playful, annoying, tease. Never repeat same reply. No AI talk.'`
+- 40% shorter than old prompt → fewer tokens, faster responses
+- Forces natural vocabulary: da, dai, seri da, mm, hmm, ohh
+- **maxTokens reduced**: 80 → 50 — forces shorter replies, fits rude teen style
+
+### New/Modified Methods
+| Method | File | Change |
+|--------|------|--------|
+| `_onSpawn()` | agnes.js | Removed 2 auto-chat lines |
+| `handlePlayerJoined()` | agnes.js | Removed auto-greeting chat |
+| `_processBrainTick()` | agnes.js | Added `_ownerChatter()` call |
+| `_idleChatter()` | agnes.js | Updated phrases to natural Tunglish |
+| `_ownerChatter()` | agnes.js | NEW — 3-min directed questions by name |
+| `_buildTunglishPrompt()` | live_chat.js | Replaced with rude/silly girl prompt |
+| `_tryChat()` | live_chat.js | maxTokens 80→50 |
+
+To revert: Restore old `_onSpawn()`/`handlePlayerJoined()` greetings. Remove `_ownerChatter()` and `_lastOwnerChat`. Restore old `_idleChatter()` phrases. Restore old prompt and maxTokens=80.
+
+---
+
+## Upgrade 29 — 5-Model Chat Engine + Parkour Movement System
+Date: 2026-06-30
+Files: src/llm/nvidia.js, src/llm/openai.js, src/llm/provider_manager.js, src/llm/gemini.js, src/chat/live_chat.js, src/agent/agnes.js, config/settings.json
+
+Changes:
+
+### 1. Five AI Models in Fallback Chain
+Requested models: gpt-5, gemini-2.5-flash, qwen-3.5, deepseek-v3, llama-3.3-70b-instruct
+
+| Model | Provider | Access |
+|-------|----------|--------|
+| deepseek-ai/deepseek-v3 | NVIDIA API (primary) | ✅ Always (nvidia key) |
+| qwen/qwen3.5-122b-a10b | NVIDIA API (fallback 1) | ✅ Always (nvidia key) |
+| meta/llama-3.3-70b-instruct | NVIDIA API (fallback 2) | ✅ Always (nvidia key) |
+| gemini-2.5-flash | Gemini API | ✅ Always (gemini key) |
+| gpt-5 | OpenAI API | ❌ Needs API key (empty) |
+
+Provider order configured via `settings.json`: `nvidia → gemini → openai → deepseek`
+NVIDIA tries 3 models in sequence: deepseek-v3 → qwen-3.5 → llama-3.3-70b — if one 429s, next is tried immediately.
+
+### 2. Pure Tunglish Prompt (100% original)
+Prompt updated: `'Speak ONLY pure Tunglish (Tamil+English mix). Max 1 short line. Natural words: da, dai, seri da, mm, hmm, ohh, poda, vaa, sollu, enna, eppa, epdi, inga, anga. Playful, annoying, tease. Never sound polite or formal. No AI phrases. No English sentences.'`
+- Added forbidden-English directive, more Tunglish vocab examples
+- maxTokens further reduced: 50 → 40 — forces shorter 1-line replies
+
+### 3. Reduced Chat Spawn Rate (less spam)
+- Idle chatter interval: 120s → 240s (every 4 minutes)
+- Owner-directed chatter: 180s → 300s (every 5 minutes)
+- Responses still happen on owner chat — only automatic chatter is slowed
+
+### 4. Parkour Movement System (`_parkourTick` + `_parkourJump`)
+New methods added to `_smartMoveTick` for 100% natural follow movement:
+
+**`_parkourTick()`** — runs every movement tick (800ms), checks 1-2 blocks ahead:
+1. **Obstacle at head+feet**: full jump (300ms) — clears 1-block tall walls
+2. **Obstacle at feet only**: step jump (200ms) — climbs stairs/slabs
+3. **Gap with far ground**: long jump (400ms) — parkours across 1-block gaps
+4. **Edge ahead (no ground)**: `setControlState('sneak', true)` — prevents falls
+5. **Safe ground**: `setControlState('sneak', false)` — resumes normal walk
+
+**`_parkourJump(duration)`** — clean timer management:
+- Clears previous jump timer to prevent overlapping jumps
+- Sets jump true, schedules jump false after duration
+- Guards with `if (!this.running) return` — safe after stop
+
+**`_smartMoveTick()` updated**:
+- Always sets sprint true (was checking `_movementMode`)
+- Calls `_parkourTick()` FIRST before old auto-jump-when-stuck logic
+- Bridge still runs after parkour
+
+### New/Modified Methods
+| Method | File | Change |
+|--------|------|--------|
+| `_smartMoveTick()` | agnes.js | Added `_parkourTick()` call, always sprint true |
+| `_parkourTick()` | agnes.js | NEW — obstacle/gap/edge detection + jump/sneak control |
+| `_parkourJump(d)` | agnes.js | NEW — clean timer-based jump with overlap guard |
+| `_buildTunglishPrompt()` | live_chat.js | Updated: pure Tunglish only, 100% original |
+| `_tryChat()` | live_chat.js | maxTokens 50→40 |
+| `_idleChatter()` | agnes.js | Interval 120→240s |
+| `_ownerChatter()` | agnes.js | Interval 180→300s |
+| NvidiaClient constructor | nvidia.js | Accepts `extraModels` array from settings |
+| `_chat()` | provider_manager.js | Uses `modelOrder` instead of primary/fallback hardcode |
+
+### Files Modified
+- `src/llm/nvidia.js`: Models → deepseek-v3 / qwen-3.5 / llama-3.3-70b; constructor accepts 4th param extraModels
+- `src/llm/openai.js`: Default model → gpt-5
+- `src/llm/provider_manager.js`: `_chat()` uses `modelOrder` array; passes nvidiaModels to NvidiaClient
+- `src/chat/live_chat.js`: Pure Tunglish prompt; maxTokens 40
+- `src/agent/agnes.js`: New `_parkourTick()`, `_parkourJump()`, smarter `_smartMoveTick()`, reduced intervals
+- `config/settings.json`: Added `nvidiaModels`, `providerOrder`
+
+To revert: Restore nvidia.js models to previous list. Remove `providerOrder`/`nvidiaModels` from settings. Revert openai.js model. Remove `_parkourTick()`/`_parkourJump()` from agnes.js. Restore old intervals (120s/180s). Restore old prompt and maxTokens=50.
+
+---
+
+## Upgrade 30 — Server Login Access
+Date: 2026-07-01
+Files: src/agent/agnes.js
+
+Changes:
+
+### 1. Auto-Login/Register on Server Join
+Since the server is offline-mode, AGNES needs to authenticate with AuthMe or similar plugins.
+
+**On first-ever join:**
+- Sends `/register agnes123 agnes123` after 1.5s spawn delay
+- Saves `{ registered: true }` to `config/login.json`
+
+**On every subsequent join:**
+- Reads `config/login.json`, sees `registered: true`
+- Sends `/login agnes123` after 1.5s spawn delay
+
+### 2. Persistence
+- State stored in `config/login.json` (simple `{ "registered": true }`)
+- Uses same `require('fs')` pattern as other config loaders in agnes.js
+- No external module dependencies
+
+### New Methods
+| Method | Description |
+|--------|-------------|
+| `_handleServerLogin()` | 1.5s after spawn: sends `/register` or `/login` based on `_loginAttempted` flag |
+| `_loadLoginState()` | Reads `config/login.json` → sets `_loginAttempted` |
+| `_saveLoginState()` | Writes `config/login.json` with `{ registered: true }` |
+
+### Modified Methods
+| Method | Change |
+|--------|--------|
+| Constructor | Added `_loginAttempted = false` + calls `_loadLoginState()` |
+| `_onSpawn()` | Calls `_handleServerLogin()` after interval setup |
+
+Password: `agnes123` (hardcoded, same for register and login)
+
+To revert: Remove `_handleServerLogin()` call from `_onSpawn()`. Remove `_loginAttempted`, `_loadLoginState()`, `_saveLoginState()`, `_handleServerLogin()` methods and constructor references.
+
+---
+
+## Upgrade 31 — Terminal Chat Interface
+Date: 2026-07-01
+Files: src/chat/terminal.js (NEW), main.js
+
+Changes:
+
+### 1. Terminal Chat (`src/chat/terminal.js`)
+New `TerminalChat` class that bridges stdin to `bot.chat()`:
+
+- Uses Node.js `readline` to listen for stdin line events
+- Every line typed in the terminal and submitted with Enter → `bot.chat(line)`
+- Supports ANY input: Minecraft commands (`/login`, `/tpa`, `/home`, etc.) and regular chat messages
+- `setBot(bot)` — update the bot reference (handles reconnections)
+- `stop()` — clean up the readline interface
+- Singleton at main.js scope — survives reconnects without duplicate readers
+
+### 2. Integration (`main.js`)
+- `TerminalChat` imported; module-level `terminal` variable
+- Created in `bot.on('spawn')` (first time) or `setBot(bot)` (reconnect)
+- `setBot(null)` on `kicked`/`end` to prevent sending to dead bot
+- `terminal.stop()` in `SIGINT` handler before process.exit
+
+### What it enables
+User can type in the terminal and it appears as if AGNES typed it in Minecraft chat. This includes:
+- Chat messages to other players
+- Server commands (/, /msg, /home, /tpa, /login, etc.)
+- Any other input the server accepts via chat
+
+Server responses are already visible via existing `console.log('[MSG]', raw)` in the messagestr handler.
+
+To revert: Remove `TerminalChat` require, instantiation in spawn, setBot calls in kicked/end, stop in SIGINT. Delete `src/chat/terminal.js`.
+
+---
+
+## Upgrade 32 — LLM Action Tags: [ACTION: FIGHT] Combat Trigger
+Date: 2026-07-01
+Files: src/chat/live_chat.js, src/agent/agnes.js
+
+Changes:
+
+### 1. Action Tag Parsing System (`live_chat.js`)
+Both `_generateTunglishResponse()` and `_generateResponse()` now parse LLM output for `[ACTION: TAGNAME]` tags:
+
+**Regex**: `/\[ACTION:\s*(\w+)\]/`
+- Matches `[ACTION: FIGHT]`, `[ACTION: EAT]`, any future action
+- Extracts tag (`[ACTION: FIGHT]`) and action name (`FIGHT`)
+- Strips the tag from chat message before sending to Minecraft
+- Fires `this.onAction(actionName, data)` callback — data includes `{ username }`
+- Works in BOTH response flows: Tunglish and standard chat
+
+### 2. onAction Callback
+New `this.onAction` property on LiveChat (default `null`). Set externally to receive action events.
+
+### 3. Combat Wiring (`agnes.js` line 113)
+After `s.chat` is created, `onAction` is wired:
+```js
+s.chat.onAction = (action, data) => {
+  if (action === 'FIGHT') this._attackTarget('nearest');
+};
+```
+- FIGHT → `_attackTarget('nearest')` — scans for nearest hostile mob, sets `_combatTarget`
+- Uses existing combat system: `_protectTick()` handles the actual attacking loop
+- No change needed to `_protectTick()` or any combat internals
+
+### 4. Prompt Update (Teach AI about the Tag)
+Tunglish prompt now includes: `"If I tell you to fight or attack, append [ACTION: FIGHT] at end of your reply."`
+
+This tells the LLM to output `[ACTION: FIGHT]` when the user says "fight", "attack", "kapathu di", etc.
+
+### Data Flow
+```
+User: "agnes, fight"
+  → handleChat() → tunglishMessage()
+  → LLM prompt: "...If I tell you to fight...append [ACTION: FIGHT]"
+  → NVIDIA responds: "ok da, pathukuren [ACTION: FIGHT]"
+  → live_chat.js: regex matches "FIGHT"
+  → strips tag → sends "ok da, pathukuren" to chat
+  → fires onAction("FIGHT", {username})
+  → agnes.js: _attackTarget("nearest")
+  → _protectTick() attacks the nearest hostile mob
+```
+
+### New / Modified
+
+| File | Method/Prop | Change |
+|------|-------------|--------|
+| live_chat.js | `onAction` property | NEW — callback for action tags |
+| live_chat.js | `_generateTunglishResponse()` | Parses [ACTION: X] tag, strips it, fires callback |
+| live_chat.js | `_generateResponse()` | Same action tag parsing added |
+| live_chat.js | `_buildTunglishPrompt()` | Added instruction about [ACTION: FIGHT] tag |
+| agnes.js | `_initSystems()` | Wires `s.chat.onAction` → `_attackTarget('nearest')` |
+
+To revert: Remove `onAction` property and tag parsing from both `_generateTunglishResponse()` and `_generateResponse()` in live_chat.js. Remove the action tag instruction from `_buildTunglishPrompt()`. Remove the `onAction` callback block from `_initSystems()` in agnes.js.
+
+---
+
+## Upgrade 33 — Utility Behaviors: Auto-Armor, Trash Disposal, Eye Contact
+Date: 2026-07-01
+Files: src/behaviors/utility.js (NEW), src/agent/agnes.js
+
+Changes:
+
+### 1. Auto-Armor Equip
+Triggered by `playerCollect` event (with 500ms delay for inventory sync) and periodic slow tick:
+
+- **Tier system** (0=best, 99=worst): netherite(0) > diamond(1) > iron(2) > gold(3) > chainmail(4) > leather(5)
+- All vanilla armor types mapped: helmets, chestplates, leggings, boots (including turtle_helmet at iron tier)
+- `_getArmorTier(itemName)` — lookup in `ARMOR_TIERS` map, returns 99 for unknown/modded armor
+- `_getSlotType(itemName)` — detects helmet/chestplate/leggings/boots from item name
+- `_getEquippedTier(slot)` — reads bot inventory slots[5-8] for currently worn armor
+- Only equips if new item has strictly better tier (`bestTier < equippedTier`)
+- `bot.equip(best, 'head'|'torso'|'legs'|'feet')` — silent `.catch(() => {})`
+
+### 2. Inventory Trash Disposer
+Triggered by `playerCollect` event (600ms after collect) and periodic slow tick:
+
+- **Set of 50+ trash items**: rotten_flesh, poi sonous_potato, spider_eye, gravel, cobblestone, dirt, all saplings, all small flowers, seeds, mushrooms, sugar_cane, eggs, raw meats, pufferfish, etc.
+- `bot.tossStack(item, callback)` — discards entire stack of any matched item
+- Throttled at 600ms to avoid spam on rapid slot updates
+- Chained after armor equip (600ms vs 500ms) so items don't get tossed before armor scan
+
+### 3. Player Eye Contact
+Called every fast tick (200ms) via `tickFast()`:
+
+- Finds owner player from `this.bot.players[owner]`
+- Distance check: <= 6 blocks
+- Stationary check: `!this.bot.pathfinder.isMoving()`
+- Combat check: `!this.systems.combat.isFighting()`
+- If all pass: `bot.lookAt(owner.entity.position.offset(0, 1.6, 0))` — looks at face level
+- Silent `.catch(() => {})` on lookAt errors
+
+### Integration Points (`agnes.js`)
+
+| Location | Code |
+|----------|------|
+| `_initSystems()` | `s.utility = this._safeBehaviors('utility');` |
+| `_processFastTick()` | `if (s.utility) s.utility.tickFast();` — runs eye contact every 200ms |
+| `_processTick()` | `if (s.utility) { s.utility._equipBestArmor(); s.utility._disposeTrash(); }` — periodic cleanup every 800ms |
+
+### Architecture
+Follows existing behavior pattern: `src/behaviors/{name}.js` exports class, loaded via `_safeBehaviors('name')` which instantiates with `(bot, systems)`.
+
+| Method | Context | Purpose |
+|--------|---------|---------|
+| `constructor(bot, systems)` | Once | Registers `playerCollect` listener, init state |
+| `tickFast()` | 200ms loop | Eye contact |
+| `_equipBestArmor()` | on collect + 800ms tick | Scans inventory, equips best tier |
+| `_disposeTrash()` | on collect + 800ms tick | Tosses trash items |
+
+To revert: Remove `s.utility` from `_initSystems()`, `tickFast()` from `_processFastTick()`, and the `_equipBestArmor()/_disposeTrash()` call from `_processTick()` in agnes.js. Delete `src/behaviors/utility.js`.

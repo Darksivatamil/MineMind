@@ -1,0 +1,12 @@
+{
+  "plains": { "temperature": 0.8, "rainfall": 0.4, "mobs": ["cow", "pig", "sheep", "chicken", "horse"] },
+  "desert": { "temperature": 2.0, "rainfall": 0.0, "mobs": ["rabbit", "husk"] },
+  "forest": { "temperature": 0.7, "rainfall": 0.8, "mobs": ["cow", "pig", "sheep", "wolf", "rabbit"] },
+  "taiga": { "temperature": 0.25, "rainfall": 0.8, "mobs": ["wolf", "rabbit", "fox"] },
+  "snowy_plains": { "temperature": 0.0, "rainfall": 0.5, "mobs": ["rabbit", "polar_bear"] },
+  "swamp": { "temperature": 0.8, "rainfall": 0.9, "mobs": ["slime", "frog"] },
+  "jungle": { "temperature": 0.95, "rainfall": 0.9, "mobs": ["ocelot", "parrot", "panda"] },
+  "badlands": { "temperature": 2.0, "rainfall": 0.0, "mobs": ["gold_ore"] },
+  "ocean": { "temperature": 0.5, "rainfall": 0.5, "mobs": ["squid", "dolphin", "tropical_fish"] },
+  "mushroom_fields": { "temperature": 0.9, "rainfall": 1.0, "mobs": ["mooshroom"] }
+}

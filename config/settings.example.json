@@ -1,0 +1,32 @@
+{
+  "owner": "YourMinecraftName",
+  "host": "localhost",
+  "port": 25565,
+  "username": "AGNES",
+  "auth": "offline",
+  "version": "1.21.11",
+  "apiKeys": {
+    "deepseek": "",
+    "openai": "",
+    "gemini": "",
+    "nvidia": ""
+  },
+  "autonomy": {
+    "autoExplore": true,
+    "autoFarm": true,
+    "autoFight": true,
+    "autoBuild": true,
+    "swarmEnabled": true
+  },
+  "llm": {
+    "primary": "nvidia",
+    "fallback": "gemini",
+    "temperature": 0.7,
+    "maxTokens": 1024,
+    "model": "deepseek-ai/deepseek-v3",
+    "geminiModel": "gemini-2.5-flash",
+    "nvidiaModels": ["deepseek-ai/deepseek-v3", "qwen/qwen3.5-122b-a10b", "meta/llama-3.3-70b-instruct"],
+    "nvidiaBaseUrl": "https://integrate.api.nvidia.com/v1",
+    "providerOrder": ["nvidia", "gemini", "openai", "deepseek"]
+  }
+}

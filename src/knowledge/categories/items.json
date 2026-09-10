@@ -1,0 +1,16 @@
+{
+  "wooden_pickaxe": { "type": "tool", "tier": "wood", "durability": 59, "speed": 2 },
+  "stone_pickaxe": { "type": "tool", "tier": "stone", "durability": 131, "speed": 4 },
+  "iron_pickaxe": { "type": "tool", "tier": "iron", "durability": 250, "speed": 6 },
+  "diamond_pickaxe": { "type": "tool", "tier": "diamond", "durability": 1561, "speed": 8 },
+  "netherite_pickaxe": { "type": "tool", "tier": "netherite", "durability": 2031, "speed": 9 },
+  "wooden_sword": { "type": "weapon", "damage": 4, "speed": 1.6 },
+  "stone_sword": { "type": "weapon", "damage": 5, "speed": 1.6 },
+  "iron_sword": { "type": "weapon", "damage": 6, "speed": 1.6 },
+  "diamond_sword": { "type": "weapon", "damage": 7, "speed": 1.6 },
+  "netherite_sword": { "type": "weapon", "damage": 8, "speed": 1.6 },
+  "bread": { "type": "food", "hunger": 5, "saturation": 6 },
+  "cooked_beef": { "type": "food", "hunger": 8, "saturation": 12.8 },
+  "apple": { "type": "food", "hunger": 4, "saturation": 2.4 },
+  "golden_apple": { "type": "food", "hunger": 4, "saturation": 9.6, "effect": "absorption" }
+}

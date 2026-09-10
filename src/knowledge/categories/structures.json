@@ -1,0 +1,9 @@
+{
+  "village": { "dimension": "overworld", "biomes": ["plains", "desert", "taiga", "snowy_plains", "savanna"], "mobs": ["villager", "iron_golem"] },
+  "desert_pyramid": { "dimension": "overworld", "biomes": ["desert"], "loot": ["diamond", "iron_ingot", "gold_ingot", "enchanted_book"] },
+  "jungle_temple": { "dimension": "overworld", "biomes": ["jungle"], "loot": ["diamond", "iron_ingot", "bone"] },
+  "igloo": { "dimension": "overworld", "biomes": ["snowy_plains"], "loot": ["golden_apple"] },
+  "stronghold": { "dimension": "overworld", "loot": ["ender_pearl", "eye_of_ender"], "feature": "end_portal" },
+  "nether_fortress": { "dimension": "nether", "mobs": ["blaze", "wither_skeleton"], "loot": ["blaze_rod", "nether_wart"] },
+  "end_city": { "dimension": "end", "mobs": ["shulker"], "loot": ["elytra", "diamond_gear"] }
+}

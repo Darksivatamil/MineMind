@@ -1,0 +1,10 @@
+node_modules/
+.env
+*.log
+dist/
+.cache/
+data/
+*.db
+backups/
+config/settings.json
+config/secrets.json

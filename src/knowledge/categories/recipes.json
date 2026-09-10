@@ -1,0 +1,10 @@
+{
+  "crafting_table": { "type": "shaped", "pattern": ["AA","AA"], "ingredients": { "A": "oak_planks" }, "result": { "item": "crafting_table", "count": 1 } },
+  "furnace": { "type": "shaped", "pattern": ["AAA","A A","AAA"], "ingredients": { "A": "cobblestone" }, "result": { "item": "furnace", "count": 1 } },
+  "wooden_pickaxe": { "type": "shaped", "pattern": ["AAA"," B "," B "], "ingredients": { "A": "oak_planks", "B": "stick" }, "result": { "item": "wooden_pickaxe", "count": 1 } },
+  "stone_pickaxe": { "type": "shaped", "pattern": ["AAA"," B "," B "], "ingredients": { "A": "cobblestone", "B": "stick" }, "result": { "item": "stone_pickaxe", "count": 1 } },
+  "iron_pickaxe": { "type": "shaped", "pattern": ["AAA"," B "," B "], "ingredients": { "A": "iron_ingot", "B": "stick" }, "result": { "item": "iron_pickaxe", "count": 1 } },
+  "diamond_pickaxe": { "type": "shaped", "pattern": ["AAA"," B "," B "], "ingredients": { "A": "diamond", "B": "stick" }, "result": { "item": "diamond_pickaxe", "count": 1 } },
+  "iron_sword": { "type": "shaped", "pattern": ["A","A","B"], "ingredients": { "A": "iron_ingot", "B": "stick" }, "result": { "item": "iron_sword", "count": 1 } },
+  "shield": { "type": "shaped", "pattern": ["ABA","AAA"," A "], "ingredients": { "A": "oak_planks", "B": "iron_ingot" }, "result": { "item": "shield", "count": 1 } }
+}

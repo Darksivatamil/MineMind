@@ -1,0 +1,11 @@
+{
+  "water_bottle": { "base": true },
+  "awkward_potion": { "base": true, "ingredient": "nether_wart" },
+  "potion_of_healing": { "effect": "instant_health", "ingredient": "glistering_melon_slice", "base": "awkward_potion" },
+  "potion_of_swiftness": { "effect": "speed", "ingredient": "sugar", "base": "awkward_potion" },
+  "potion_of_fire_resistance": { "effect": "fire_resistance", "ingredient": "magma_cream", "base": "awkward_potion" },
+  "potion_of_strength": { "effect": "strength", "ingredient": "blaze_powder", "base": "awkward_potion" },
+  "potion_of_regeneration": { "effect": "regeneration", "ingredient": "ghast_tear", "base": "awkward_potion" },
+  "potion_of_poison": { "effect": "poison", "ingredient": "spider_eye", "base": "awkward_potion" },
+  "potion_of_weakness": { "effect": "weakness", "ingredient": "fermented_spider_eye", "base": "water_bottle" }
+}

@@ -1,0 +1,10 @@
+{
+  "tiers": {
+    "wood": { "order": 0, "description": "First tools, punch trees", "milestones": ["wooden_pickaxe", "wooden_sword"] },
+    "stone": { "order": 1, "description": "Mine stone, upgrade tools", "milestones": ["stone_pickaxe", "furnace", "stone_sword"] },
+    "iron": { "order": 2, "description": "Find iron, better gear", "milestones": ["iron_pickaxe", "iron_sword", "shield", "bucket", "shield"] },
+    "diamond": { "order": 3, "description": "Find diamonds, enchant", "milestones": ["diamond_pickaxe", "diamond_sword", "enchanting_table", "anvil"] },
+    "nether": { "order": 4, "description": "Enter the Nether, get netherite", "milestones": ["netherite_scrap", "netherite_ingot", "netherite_pickaxe"] },
+    "end": { "order": 5, "description": "Defeat the Ender Dragon", "milestones": ["ender_pearl", "blaze_rod", "eye_of_ender"] }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "game": {
+    "name": "Minecraft",
+    "version": "1.20.1",
+    "description": "A sandbox game about breaking and placing blocks"
+  },
+  "dimensions": ["overworld", "nether", "end"],
+  "gameModes": ["survival", "creative", "adventure", "spectator"],
+  "difficulties": ["peaceful", "easy", "normal", "hard"]
+}

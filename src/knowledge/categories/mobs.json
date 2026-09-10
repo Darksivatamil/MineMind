@@ -1,0 +1,14 @@
+{
+  "cow": { "type": "passive", "health": 10, "drops": ["beef", "leather"] },
+  "pig": { "type": "passive", "health": 10, "drops": ["porkchop"] },
+  "sheep": { "type": "passive", "health": 8, "drops": ["mutton", "wool"] },
+  "chicken": { "type": "passive", "health": 4, "drops": ["chicken", "feathers"] },
+  "rabbit": { "type": "passive", "health": 3, "drops": ["rabbit", "rabbit_hide"] },
+  "zombie": { "type": "hostile", "health": 20, "damage": 3, "drops": ["rotten_flesh", "iron_ingot", "carrot", "potato"] },
+  "skeleton": { "type": "hostile", "health": 20, "damage": 3, "drops": ["bone", "arrow"] },
+  "creeper": { "type": "hostile", "health": 20, "damage": 49, "drops": ["gunpowder"] },
+  "spider": { "type": "hostile", "health": 16, "damage": 2, "drops": ["string", "spider_eye"] },
+  "enderman": { "type": "neutral", "health": 40, "damage": 7, "drops": ["ender_pearl"] },
+  "wolf": { "type": "neutral", "health": 8, "damage": 3, "drops": [] },
+  "iron_golem": { "type": "neutral", "health": 100, "damage": 7, "drops": ["iron_ingot", "poppy"] }
+}
