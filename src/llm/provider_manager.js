@@ -2,6 +2,7 @@ const { DeepSeekClient } = require('./deepseek');
 const { OpenAIClient } = require('./openai');
 const { GeminiClient } = require('./gemini');
 const { NvidiaClient } = require('./nvidia');
+const { OpenRouterClient } = require('./openrouter');
 
 class ProviderManager {
   constructor(settings) {
@@ -19,9 +20,17 @@ class ProviderManager {
         settings.llm?.nvidiaModels
       );
     } catch (e) { console.error('nvidia init failed:', e.message); }
+    try {
+      this.providers.openrouter = new OpenRouterClient(
+        process.env.OPENROUTER_API_KEY || settings.apiKeys?.openrouter,
+        settings.llm?.openRouterBaseUrl,
+        process.env.OPENROUTER_MODEL || settings.llm?.openRouterModel,
+        settings.llm?.openRouterModels
+      );
+    } catch (e) { console.error('openrouter init failed:', e.message); }
     this.primary = settings.llm?.primary || 'nvidia';
     this.fallback = settings.llm?.fallback || 'gemini';
-    this.modelOrder = settings.llm?.providerOrder || ['nvidia', 'gemini', 'openai', 'deepseek'];
+    this.modelOrder = settings.llm?.providerOrder || ['openrouter', 'nvidia', 'gemini', 'openai', 'deepseek'];
     this.lastError = null;
   }
 
@@ -41,12 +50,14 @@ class ProviderManager {
     const provider = this.providers[providerName];
     if (!provider) throw new Error(`Unknown provider: ${providerName}`);
     if (!provider.isAvailable()) throw new Error(`${providerName} is not available`);
-    const { primary, fallback, providerOrder, nvidiaModels, nvidiaBaseUrl, geminiModel, model, ...cleanLlm } = (this.settings.llm || {});
+    // Keep model selectors (geminiModel/model/openRouterModel/...) so each
+    // provider resolves its own model. Only strip routing-only keys.
+    const { primary, fallback, providerOrder, ...cleanLlm } = (this.settings.llm || {});
     return provider.chat(messages, { ...cleanLlm, ...opts });
   }
 
   async _chat(messages, opts = {}) {
-    const { primary, fallback, providerOrder, nvidiaModels, nvidiaBaseUrl, ...cleanLlm } = (this.settings.llm || {});
+    const { primary, fallback, providerOrder, ...cleanLlm } = (this.settings.llm || {});
     const llmOpts = { ...cleanLlm, ...opts };
     const ordered = this.modelOrder;
 

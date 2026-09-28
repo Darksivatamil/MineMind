@@ -14,9 +14,14 @@ class ActionQueue {
   }
 
   dequeue() {
-    if (this.queue.length === 0) return null;
+    if (this.queue.length === 0) { this.current = null; return null; }
     this.current = this.queue.shift();
+    this.current.started = Date.now();
     return this.current;
+  }
+
+  complete() {
+    this.current = null;
   }
 
   peek() {

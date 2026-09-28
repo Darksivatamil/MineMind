@@ -1,16 +1,38 @@
 class PersonalityV2 {
   constructor() {
     this.traits = {
-      openness: 0.6 + Math.random() * 0.3,
-      conscientiousness: 0.5 + Math.random() * 0.3,
-      extraversion: 0.5 + Math.random() * 0.3,
-      agreeableness: 0.6 + Math.random() * 0.3,
-      neuroticism: 0.3 + Math.random() * 0.3
+      openness: 0.7,
+      conscientiousness: 0.6,
+      extraversion: 0.6,
+      agreeableness: 0.7,
+      neuroticism: 0.4
     };
     this.currentMood = 'neutral';
     this.moodIntensity = 0.5;
     this.evolutionStage = 0;
     this.experience = 0;
+    this._saveAt = 0;
+    this._file = null;
+    try {
+      const path = require('path');
+      this._file = path.join(__dirname, '..', '..', 'config', 'personality.json');
+      const fs = require('fs');
+      if (fs.existsSync(this._file)) {
+        const d = JSON.parse(fs.readFileSync(this._file, 'utf8'));
+        if (d && d.traits) {
+          for (const k of Object.keys(this.traits)) {
+            if (typeof d.traits[k] === 'number') this.traits[k] = Math.min(1, Math.max(0, d.traits[k]));
+          }
+        }
+        if (typeof d.experience === 'number') this.experience = Math.max(0, d.experience);
+        if (typeof d.evolutionStage === 'number') this.evolutionStage = Math.min(4, Math.max(0, d.evolutionStage));
+      } else {
+        // First run only: small deterministic variation (no more full-random restarts)
+        const j = () => (Math.random() - 0.5) * 0.1;
+        for (const k of Object.keys(this.traits)) this.traits[k] = Math.min(1, Math.max(0, this.traits[k] + j()));
+        this._save();
+      }
+    } catch (e) {}
     this.moods = {
       neutral: { triggers: ['calm', 'safe'], decay: 0.01 },
       happy: { triggers: ['gift', 'chat', 'discovery'], decay: 0.02 },
@@ -42,6 +64,20 @@ class PersonalityV2 {
         this.moodIntensity = 0.5;
       }
     }
+    const now = Date.now();
+    if (now - this._saveAt > 60000) { this._saveAt = now; this._save(); }
+  }
+
+  _save() {
+    if (!this._file) return;
+    try {
+      const fs = require('fs');
+      fs.writeFileSync(this._file + '.tmp', JSON.stringify({
+        traits: this.getTraits(), experience: this.experience,
+        evolutionStage: this.evolutionStage, savedAt: Date.now()
+      }, null, 2));
+      fs.renameSync(this._file + '.tmp', this._file);
+    } catch (e) {}
   }
 
   setMood(mood, intensity) {
@@ -59,14 +95,15 @@ class PersonalityV2 {
     const c = this.traits.conscientiousness;
 
     const moodMod = this._getMoodModifier();
+    const clamp = (v) => Math.min(1, Math.max(0, Math.round(v * 100) / 100));
 
     return {
-      explore: Math.round((o * 0.7 + e * 0.3 + moodMod) * 100) / 100,
-      social: Math.round((e * 0.6 + a * 0.4 + moodMod * 0.5) * 100) / 100,
-      fight: Math.round(((1 - a) * 0.5 + n * 0.3 + moodMod * 0.2) * 100) / 100,
-      flee: Math.round((n * 0.6 + (1 - c) * 0.4 + moodMod * 0.3) * 100) / 100,
-      gather: Math.round((c * 0.5 + o * 0.3) * 100) / 100,
-      build: Math.round((c * 0.6 + o * 0.2) * 100) / 100
+      explore: clamp(o * 0.7 + e * 0.3 + moodMod),
+      social: clamp(e * 0.6 + a * 0.4 + moodMod * 0.5),
+      fight: clamp((1 - a) * 0.5 + n * 0.3 + moodMod * 0.2),
+      flee: clamp(n * 0.6 + (1 - c) * 0.4 + moodMod * 0.3),
+      gather: clamp(c * 0.5 + o * 0.3),
+      build: clamp(c * 0.6 + o * 0.2)
     };
   }
 

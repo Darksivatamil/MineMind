@@ -71,25 +71,25 @@ class SqliteStore {
 
   addMemory(layer, category, content, importance, strength, timestamp) {
     if (!this.available) return null;
-    const r = this.stmtAddMemory.get(layer, category, content, importance, strength, timestamp);
-    void r;
+    const r = this.stmtAddMemory.run(layer, category, content, importance, strength, timestamp);
+    if (r && typeof r.lastInsertRowid === 'number') return Number(r.lastInsertRowid);
     const row = this.db.prepare('SELECT last_insert_rowid() AS id').get();
     return row ? row.id : null;
   }
 
   updateMemoryLayer(id, layer) {
     if (!this.available) return;
-    this.db.prepare('UPDATE memories SET layer = ? WHERE id = ?').get(layer, id);
+    this.db.prepare('UPDATE memories SET layer = ? WHERE id = ?').run(layer, id);
   }
 
   updateMemoryStrength(id, strength) {
     if (!this.available) return;
-    this.db.prepare('UPDATE memories SET strength = ? WHERE id = ?').get(strength, id);
+    this.db.prepare('UPDATE memories SET strength = ? WHERE id = ?').run(strength, id);
   }
 
   deleteMemory(id) {
     if (!this.available) return;
-    this.db.prepare('DELETE FROM memories WHERE id = ?').get(id);
+    this.db.prepare('DELETE FROM memories WHERE id = ?').run(id);
   }
 
   countByLayer(layer) {
@@ -106,7 +106,7 @@ class SqliteStore {
         SELECT id FROM memories WHERE layer = ?
         ORDER BY importance DESC, strength DESC, created_at DESC
         LIMIT -1 OFFSET ?
-      )`).get(layer, maxKeep);
+      )`).run(layer, maxKeep);
   }
 
   getRecent(count) {
@@ -134,11 +134,11 @@ class SqliteStore {
     this.db.prepare(`
       UPDATE memories SET strength = MAX(0, strength - (MIN(1, (? - created_at) / 3600000.0 / 24.0) * 0.1))
       WHERE layer IN ('short','medium','long')
-    `).get(now);
+    `).run(now);
     // delete weak + unimportant
     this.db.prepare(
       `DELETE FROM memories WHERE strength < ? AND importance < ?`
-    ).get(minStrength, minImportance);
+    ).run(minStrength, minImportance);
   }
 
   searchMemories(query, limit) {
@@ -152,14 +152,15 @@ class SqliteStore {
 
   addChat(username, message, response, timestamp) {
     if (!this.available) return null;
-    this.stmtAddChat.get(username, message, response || null, timestamp);
+    const r = this.stmtAddChat.run(username, message, response || null, timestamp);
+    if (r && typeof r.lastInsertRowid === 'number') return Number(r.lastInsertRowid);
     const row = this.db.prepare('SELECT last_insert_rowid() AS id').get();
     return row ? row.id : null;
   }
 
   updateChatResponse(id, response) {
     if (!this.available) return;
-    this.db.prepare('UPDATE chats SET response = ? WHERE id = ?').get(response, id);
+    this.db.prepare('UPDATE chats SET response = ? WHERE id = ?').run(response, id);
   }
 
   getChats(username, count) {
@@ -195,18 +196,18 @@ class SqliteStore {
     ).all(over);
     const ids = old.map(r => r.id);
     const placeholders = ids.map(() => '?').join(',');
-    this.db.prepare(`DELETE FROM chats WHERE id IN (${placeholders})`).get(...ids);
+    this.db.prepare(`DELETE FROM chats WHERE id IN (${placeholders})`).run(...ids);
     return old;
   }
 
   addSummary(content, timestamp) {
     if (!this.available) return;
-    this.stmtAddSummary.get(content, timestamp);
+    this.stmtAddSummary.run(content, timestamp);
     // keep only 10 newest summaries
     this.db.prepare(`
       DELETE FROM summaries WHERE id IN (
         SELECT id FROM summaries ORDER BY created_at DESC LIMIT -1 OFFSET 10
-      )`).get();
+      )`).run();
   }
 
   getSummaries(count) {

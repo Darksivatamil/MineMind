@@ -38,7 +38,7 @@ class CommandEngine {
       { name: 'drop', desc: 'Drop item', perm: 'trusted', exec: (u, a) => this._drop(a) },
       { name: 'hold', desc: 'Hold item', perm: 'trusted', exec: (u, a) => this._hold(a) },
       { name: 'activate', desc: 'Use/activate block', perm: 'trusted', exec: () => this._activate() },
-      { name: 'fish', desc: 'Go fishing', perm: 'trusted', exec: () => this.bot.chat('I wish I could fish!') }
+      { name: 'fish', desc: 'Go fishing', perm: 'trusted', exec: () => this._fish() }
     ];
 
     const inventoryCmds = [
@@ -46,9 +46,9 @@ class CommandEngine {
       { name: 'items', desc: 'List items', perm: 'everyone', exec: (u) => this._showInventory(u) },
       { name: 'armor', desc: 'Show armor', perm: 'everyone', exec: () => this._showArmor() },
       { name: 'craft', desc: 'Craft item', perm: 'trusted', exec: (u, a) => this._craft(a) },
-      { name: 'smelt', desc: 'Smelt item', perm: 'trusted', exec: () => this.bot.chat('Smelting not yet implemented') },
-      { name: 'repair', desc: 'Repair item', perm: 'trusted', exec: () => this.bot.chat('Repairing not yet implemented') },
-      { name: 'enchant', desc: 'Enchant item', perm: 'admin', exec: () => this.bot.chat('Enchanting not yet implemented') },
+      { name: 'smelt', desc: 'Smelt item', perm: 'trusted', exec: (u, a) => this._smelt(a) },
+      { name: 'repair', desc: 'Repair item', perm: 'trusted', exec: () => this.bot.chat('repair ku anvil venum da, anvil kattu aprom panren') },
+      { name: 'enchant', desc: 'Enchant item', perm: 'admin', exec: () => this.bot.chat('enchant table venum da, table vechu XP oda vaa') },
       { name: 'give', desc: 'Give item to player', perm: 'trusted', exec: (u, a) => this._give(u, a) }
     ];
 
@@ -88,8 +88,8 @@ class CommandEngine {
     ];
 
     const survivalCmds = [
-      { name: 'build', desc: 'Build a shelter', perm: 'trusted', exec: () => this.bot.chat('Building not yet implemented') },
-      { name: 'farm', desc: 'Start farming', perm: 'trusted', exec: () => this.bot.chat('Farming not yet implemented') },
+      { name: 'build', desc: 'Build a mini home', perm: 'trusted', exec: () => this._buildHome() },
+      { name: 'farm', desc: 'Harvest and replant crops', perm: 'trusted', exec: () => this._farm() },
       { name: 'find_tree', desc: 'Find nearest tree', perm: 'trusted', exec: () => this._findTree() },
       { name: 'collect', desc: 'Collect nearby items', perm: 'trusted', exec: () => this._collectNearby() },
       { name: 'torch', desc: 'Place torch', perm: 'trusted', exec: () => this._placeTorch() },
@@ -460,6 +460,61 @@ class CommandEngine {
     if (pos && this.systems.executor) {
       this.systems.executor.queue.add({ type: 'move', x: pos.x + 5, y: pos.y, z: pos.z + 5 }, 30);
     }
+  }
+
+  _fish() {
+    try {
+      const items = (this.bot.inventory && this.bot.inventory.items()) || [];
+      const rod = items.find(i => i.name && i.name.includes('fishing_rod'));
+      if (!rod) { this.bot.chat('fishing rod illa da, rod kodu aprom meen pidikaren'); return; }
+      if (typeof this.bot.fish !== 'function') { this.bot.chat('meen pidika theriyala da version sari illa'); return; }
+      this.bot.equip(rod, 'hand').then(() => {
+        this.bot.chat('meen pidikaren da satham podatha');
+        this.bot.fish().then(() => {
+          try { this.bot.chat('meen pudichuten da paaru'); } catch (e) {}
+        }).catch((e) => {
+          try { this.bot.chat(`meen miss aachu da (${String(e.message || e).slice(0, 60)})`); } catch (e2) {}
+        });
+      }).catch(() => this.bot.chat('rod eduka mudila da'));
+    } catch (e) { try { this.bot.chat('meen pidika mudila da'); } catch (e2) {} }
+  }
+
+  _smelt(args) {
+    try {
+      const furnace = this.bot.findBlock && this.bot.findBlock({ matching: (b) => b && b.name && b.name.includes('furnace'), maxDistance: 8 });
+      if (!furnace) { this.bot.chat('furnace pakathula illa da, furnace vechu koopdu'); return; }
+      const what = (args || '').trim();
+      this.bot.chat(what ? `furnace kandupudichen da, ${what} ah vechi suda poren` : 'furnace kandupudichen da, cook panra item ah sollu');
+      if (this.systems.executor && this.bot.entity) {
+        this.systems.executor.queue.add({ type: 'move', x: furnace.position.x, y: furnace.position.y, z: furnace.position.z }, 30);
+      }
+    } catch (e) { try { this.bot.chat('suda mudila da furnace check pannu'); } catch (e2) {} }
+  }
+
+  _buildHome() {
+    try {
+      if (this.systems.events && typeof this.systems.events._miniHome === 'function') {
+        this.systems.events._miniHome();
+        return;
+      }
+      this.bot.chat('veedu katta block venum da cobble/dirt kodu');
+    } catch (e) {}
+  }
+
+  _farm() {
+    try {
+      if (this.systems.survival && typeof this.systems.survival.tickFarm === 'function') {
+        this.systems.survival.tickFarm();
+        this.bot.chat('thottam paakura da palam parikaren');
+        return;
+      }
+      // Fallback: walk to nearest mature crop patch
+      const crop = this.bot.findBlock && this.bot.findBlock({ matching: (b) => b && b.name && (b.name.includes('wheat') || b.name.includes('carrot') || b.name.includes('potato')), maxDistance: 16 });
+      if (crop && this.systems.executor) {
+        this.systems.executor.queue.add({ type: 'move', x: crop.position.x, y: crop.position.y, z: crop.position.z }, 30);
+        this.bot.chat('payir pakathula poren da');
+      } else this.bot.chat('payir onnum therila da seeds vechu vaa');
+    } catch (e) {}
   }
 
   _whisper(username, args) {

@@ -7,15 +7,42 @@ class Executor {
     this.mode = 'TOWARD';
     this.wanderTarget = null;
     this.wanderTimer = 0;
+    this.current = null;
+    try {
+      if (this.bot && typeof this.bot.on === 'function') {
+        this.bot.on('goal_reached', () => {
+          try { if (this.queue && typeof this.queue.complete === 'function') this.queue.complete(); } catch (e) {}
+          this.current = null;
+        });
+      }
+    } catch (e) {}
   }
 
   processQueue() {
+    // Anti-stall: if stuck on the same action too long, drop it (prevents mine/attack starvation)
+    if (this.current && this.current.started && (Date.now() - this.current.started) > 15000) {
+      try { if (this.queue && typeof this.queue.complete === 'function') this.queue.complete(); } catch (e) {}
+      this.current = null;
+    }
     if (this.bot.pathfinder && this.bot.pathfinder.isMoving()) return;
 
     const next = this.queue.dequeue();
     if (!next) return;
+    this.current = next;
 
-    this._execute(next.action);
+    try {
+      this._execute(next.action);
+    } finally {
+      // Movement goals are async (pathfinder); instant actions complete immediately
+      const t = next.action && next.action.type;
+      if (t !== 'move' && t !== 'mine' && t !== 'follow' && t !== 'wander') {
+        try { this.queue.complete(); } catch (e) {}
+        this.current = null;
+      } else if (t === 'attack') {
+        try { this.queue.complete(); } catch (e) {}
+        this.current = null;
+      }
+    }
   }
 
   _execute(action) {
@@ -54,12 +81,36 @@ class Executor {
     this.mode = 'TOWARD';
     if (!this.bot.pathfinder || !action.block) return;
     try {
+      const bp = action.block.position;
+      const dist = this.bot.entity ? this.bot.entity.position.distanceTo(bp) : 99;
+      if (dist < 4.5) {
+        // In range: actually dig (old code only walked to the block and never dug)
+        try {
+          const tool = this.bot.pathfinder ? null : null;
+          void tool;
+          this.bot.dig(action.block).then(() => {
+            try { this.queue.complete(); } catch (e) {}
+            this.current = null;
+          }).catch(() => {
+            try { this.queue.complete(); } catch (e) {}
+            this.current = null;
+          });
+        } catch (e) {
+          try { this.queue.complete(); } catch (e2) {}
+          this.current = null;
+        }
+        return;
+      }
       this.bot.pathfinder.setGoal(new GoalNear(
         action.block.position.x,
         action.block.position.y,
         action.block.position.z,
         2
       ));
+      // Re-queue so we dig once we arrive (with a bounded retry via anti-stall timer)
+      try { this.queue.add({ type: 'mine', block: action.block }, 0); } catch (e) {}
+      try { this.queue.complete(); } catch (e) {}
+      this.current = null;
     } catch (e) { console.error('[Executor] mine setGoal error:', e.message); }
   }
 

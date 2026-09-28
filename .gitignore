@@ -8,3 +8,6 @@ data/
 backups/
 config/settings.json
 config/secrets.json
+config/personality.json
+config/homes.json
+config/waypoints.json

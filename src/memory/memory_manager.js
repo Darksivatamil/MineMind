@@ -24,7 +24,7 @@ class MemoryManager {
   add(category, content, importance) {
     if (content == null) return null;
     if (typeof content !== 'string') { try { content = JSON.stringify(content); } catch (e) { return null; } }
-    const imp = Math.min(1, importance || 0.5);
+    const imp = Math.min(1, Math.max(0, (importance ?? 0.5)));
     const now = Date.now();
     if (this.useDb) {
       const id = this.store.addMemory('short', category || 'general', content, imp, 1.0, now);

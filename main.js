@@ -111,6 +111,7 @@ function createBot() {
 
   bot.on('kicked', (reason) => {
     console.log('AGNES was kicked:', reason);
+    try { if (agent && typeof agent.stop === 'function') agent.stop(); } catch (e) {}
     agent = null;
     if (terminal) terminal.setBot(null);
     _lastChatMsg = '';
@@ -120,6 +121,7 @@ function createBot() {
 
   bot.on('end', () => {
     console.log('AGNES disconnected');
+    try { if (agent && typeof agent.stop === 'function') agent.stop(); } catch (e) {}
     agent = null;
     if (terminal) terminal.setBot(null);
     _lastChatMsg = '';

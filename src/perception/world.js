@@ -18,9 +18,9 @@ class WorldPerception {
     const safeRange = Math.min(Math.max(1, range || 4), 8);
     const pos = this.bot.entity.position;
     if (!pos) return blocks;
-    for (let x = -range; x <= range; x++) {
-      for (let y = -range; y <= range; y++) {
-        for (let z = -range; z <= range; z++) {
+    for (let x = -safeRange; x <= safeRange; x++) {
+      for (let y = -safeRange; y <= safeRange; y++) {
+        for (let z = -safeRange; z <= safeRange; z++) {
           const block = this.getBlock({ x: pos.x + x, y: pos.y + y, z: pos.z + z });
           if (block && block.name !== 'air') {
             blocks.push(block);
@@ -34,10 +34,11 @@ class WorldPerception {
   findBlock(name, maxDistance) {
     if (!this.bot.entity) return null;
     try {
-      const blockId = this.bot.registry && this.bot.registry.blocksByName && this.bot.registry.blocksByName[name]
-        ? this.bot.registry.blocksByName[name].id : null;
+      const key = String(name || '').toLowerCase();
+      const entry = this.bot.registry && this.bot.registry.blocksByName && this.bot.registry.blocksByName[key];
+      if (!entry) return null;
       return this.bot.findBlock({
-        matching: blockId != null ? blockId : name,
+        matching: entry.id,
         maxDistance: Math.min(maxDistance || 32, 64)
       });
     } catch (e) {
@@ -55,7 +56,8 @@ class WorldPerception {
     const dy = -Math.sin(pitch);
     const dz = Math.cos(dir) * Math.cos(pitch);
     try {
-      return this.bot.world.raycast(pos, { x: dx, y: dy, z: dz }, distance || 8);
+      const eye = { x: pos.x, y: pos.y + 1.62, z: pos.z };
+      return this.bot.world.raycast(eye, { x: dx, y: dy, z: dz }, distance || 8);
     } catch (e) {
       return null;
     }

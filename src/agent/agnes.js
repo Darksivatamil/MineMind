@@ -108,7 +108,7 @@ class AgnesAgent {
     if (ss) s.social = new ss.SocialSystem(this.bot, s.socialMemory);
     const lc = this._safeRequire('../chat/live_chat');
     if (lc) {
-      s.chat = new lc.LiveChat(this.bot, s.llm, s.memory, s.personality, s.social, s.socialMemory);
+      s.chat = new lc.LiveChat(this.bot, s.llm, s.memory, s.personality, s.social, s.socialMemory, s.knowledge);
       s.chat.onAction = (action, data) => {
         if (action === 'FIGHT') this._attackTarget('nearest');
       };
@@ -119,6 +119,10 @@ class AgnesAgent {
     if (ce) s.commands = new ce.CommandEngine(this.bot, s, this.settings);
     const sw = this._safeRequire('../swarm/swarm');
     if (sw) s.swarm = new sw.SwarmOrchestrator(this.bot, s);
+    try {
+      const ev = this._safeRequire('../events/events_engine');
+      if (ev) s.events = new ev.EventsEngine(this.bot, this);
+    } catch (e) { console.error('[AGNES] events init error:', e.message); }
     s.follow = this._safeBehaviors('follow');
     s.combat = this._safeBehaviors('combat');
     s.idle = this._safeBehaviors('idle');
@@ -202,6 +206,16 @@ class AgnesAgent {
     if (this._frozen || this._joinSeqInProgress || this._greetingInProgress) return;
     const s = this.systems;
     if (s.emotions) s.emotions.tick();
+    // One-way mood sync: emotions is the live authority, personality mirrors it
+    // (fixes split-brain where two mood systems diverged).
+    try {
+      if (s.emotions && s.personality && typeof s.personality.setMood === 'function') {
+        const st = s.emotions.getState();
+        if (st && st.mood && st.mood !== s.personality.currentMood && st.mood !== 'neutral') {
+          s.personality.setMood(st.mood, st.intensity);
+        }
+      }
+    } catch (e) {}
     if (s.social) s.social.tick();
     if (s.survival) s.survival.tick();
     if (s.swarm) s.swarm.tick();
@@ -239,6 +253,7 @@ class AgnesAgent {
     if (s.chat && s.chat.shouldThink()) {
       s.chat.think(state);
     }
+    if (s.events) { try { s.events.tick(); } catch (e) { console.error('events tick error:', e.message); } }
     this._idleChatter();
     this._ownerChatter();
   }
@@ -970,10 +985,23 @@ class AgnesAgent {
     const player = this.bot.players[this._followTarget];
     if (!player || !player.entity) return;
 
+    // Swim/float first: water needs jump-hold, not parkour
+    try { this._swimTick(); } catch (e) {}
+    // Continuous human-like head tracking while following
+    try {
+      if (this.systems.gaze && player.entity.position) this.systems.gaze.lookAtEntity(player.entity);
+      else if (player.entity.position) {
+        const p = this.bot.lookAt(player.entity.position.offset(0, 1.5, 0), true);
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      }
+    } catch (e) {}
+
     const dist = this.bot.entity.position.distanceTo(player.entity.position);
 
     if (dist > this._followDistance + 2 && this.bot.pathfinder && this.bot.pathfinder.isMoving()) {
-      this.bot.setControlState('sprint', true);
+      // Respect walk/run mode instead of forcing sprint
+      const wantSprint = (this._movementMode || 'sprint') === 'sprint' && dist > 6;
+      try { this.bot.setControlState('sprint', !!wantSprint); } catch (e) {}
 
       this._parkourTick();
 
@@ -1036,9 +1064,34 @@ class AgnesAgent {
     this.bot.setControlState('jump', true);
     this._parkourJumpTimer = setTimeout(() => {
       if (!this.running) return;
-      this.bot.setControlState('jump', false);
+      try { if (!this._isInWater()) this.bot.setControlState('jump', false); } catch (e) {}
       this._parkourJumpTimer = null;
     }, duration);
+  }
+
+  _isInWater() {
+    try {
+      if (!this.bot || !this.bot.entity || !this.bot.entity.position) return false;
+      if (this.bot.entity.isInWater === true) return true;
+      const p = this.bot.entity.position;
+      const b = this.bot.blockAt(vec3(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z)));
+      if (b && b.name && (b.name.includes('water') || b.name.includes('lava'))) return true;
+      const b2 = this.bot.blockAt(vec3(Math.floor(p.x), Math.floor(p.y) + 1, Math.floor(p.z)));
+      if (b2 && b2.name && (b2.name.includes('water') || b2.name.includes('lava'))) return true;
+    } catch (e) {}
+    return false;
+  }
+
+  _swimTick() {
+    if (!this.bot || !this.bot.entity) return;
+    if (this._isInWater()) {
+      // Human-like swim: hold jump to stay afloat + keep moving forward
+      try { this.bot.setControlState('jump', true); } catch (e) {}
+      try { this.bot.setControlState('sprint', false); } catch (e) {}
+      try { this.bot.setControlState('sneak', false); } catch (e) {}
+    } else if (!this._parkourJumpTimer) {
+      try { this.bot.setControlState('jump', false); } catch (e) {}
+    }
   }
 
   async _simpleBridge() {
@@ -1237,7 +1290,7 @@ class AgnesAgent {
     try {
       const fs = require('fs');
       const path = require('path');
-      const file = path.join(__dirname, '..', 'config', 'homes.json');
+      const file = path.join(__dirname, '..', '..', 'config', 'homes.json');
       const tmp = file + '.tmp';
       fs.writeFileSync(tmp, JSON.stringify(this._homes, null, 2));
       fs.renameSync(tmp, file);
@@ -1248,7 +1301,7 @@ class AgnesAgent {
     try {
       const fs = require('fs');
       const path = require('path');
-      const file = path.join(__dirname, '..', 'config', 'homes.json');
+      const file = path.join(__dirname, '..', '..', 'config', 'homes.json');
       if (fs.existsSync(file)) {
         this._homes = JSON.parse(fs.readFileSync(file, 'utf8'));
       }
@@ -1259,7 +1312,7 @@ class AgnesAgent {
     try {
       const fs = require('fs');
       const path = require('path');
-      const file = path.join(__dirname, '..', 'config', 'waypoints.json');
+      const file = path.join(__dirname, '..', '..', 'config', 'waypoints.json');
       const tmp = file + '.tmp';
       fs.writeFileSync(tmp, JSON.stringify(this._waypoints, null, 2));
       fs.renameSync(tmp, file);
@@ -1270,7 +1323,7 @@ class AgnesAgent {
     try {
       const fs = require('fs');
       const path = require('path');
-      const file = path.join(__dirname, '..', 'config', 'waypoints.json');
+      const file = path.join(__dirname, '..', '..', 'config', 'waypoints.json');
       if (fs.existsSync(file)) {
         this._waypoints = JSON.parse(fs.readFileSync(file, 'utf8'));
       }
@@ -1281,7 +1334,7 @@ class AgnesAgent {
     try {
       const fs = require('fs');
       const path = require('path');
-      const file = path.join(__dirname, '..', 'config', 'movement.json');
+      const file = path.join(__dirname, '..', '..', 'config', 'movement.json');
       const tmp = file + '.tmp';
       fs.writeFileSync(tmp, JSON.stringify({ mode: this._movementMode }));
       fs.renameSync(tmp, file);
@@ -1292,7 +1345,7 @@ class AgnesAgent {
     try {
       const fs = require('fs');
       const path = require('path');
-      const file = path.join(__dirname, '..', 'config', 'movement.json');
+      const file = path.join(__dirname, '..', '..', 'config', 'movement.json');
       if (fs.existsSync(file)) {
         const data = JSON.parse(fs.readFileSync(file, 'utf8'));
         if (data.mode === 'sprint' || data.mode === 'walk') {
@@ -1306,6 +1359,23 @@ class AgnesAgent {
   _protectTick() {
     if (!this.bot.entity || !this.bot.entities) return;
 
+    // === Critical HP: retreat + eat (human-like survival, works mid-fight) ===
+    try {
+      const hp = this.bot.health || 20;
+      if (hp < 6 && this._combatTarget) {
+        if (this.bot.pvp && typeof this.bot.pvp.stop === 'function') { try { this.bot.pvp.stop(); } catch (e) {} }
+        const away = this.bot.entity.position.offset(
+          (this.bot.entity.position.x - this._combatTarget.position.x) > 0 ? 8 : -8, 0,
+          (this.bot.entity.position.z - this._combatTarget.position.z) > 0 ? 8 : -8
+        );
+        if (this.bot.pathfinder && !this.bot.pathfinder.isMoving()) {
+          try { this.bot.pathfinder.setGoal(new GoalNear(away.x, this.bot.entity.position.y, away.z, 2)); } catch (e) {}
+        }
+        this._eat(true);
+        if (hp < 4) { this._combatTarget = null; return; }
+      }
+    } catch (e) {}
+
     // === If already fighting, keep chasing/attacking the current target ===
     if (this._combatTarget) {
       if (!this.bot.entities[this._combatTarget.id]) {
@@ -1316,10 +1386,10 @@ class AgnesAgent {
       } else {
         const dist = this.bot.entity.position.distanceTo(this._combatTarget.position);
         if (dist <= 4) {
-          this._equipBestWeapon();
+          this._combatLoadout(this._combatTarget);
           try { this.bot.attack(this._combatTarget); } catch (e) { console.error('[FIGHT] attack err:', e.message); }
         } else {
-          this._equipBestWeapon();
+          this._combatLoadout(this._combatTarget);
           if (this.bot.pathfinder && !this.bot.pathfinder.isMoving()) {
             try {
               this.bot.pathfinder.setGoal(new GoalNear(
@@ -1383,6 +1453,64 @@ class AgnesAgent {
       }
     }
     console.warn('[FIGHT] no weapon in inventory, using fists');
+  }
+
+  _combatLoadout(target) {
+    // Full fight loadout: best weapon + shield offhand + emergency food/potion + bow attempt at range
+    this._equipBestWeapon();
+    try {
+      const items = (this.bot.inventory && this.bot.inventory.items()) || [];
+      const shield = items.find(i => i.name && i.name.includes('shield'));
+      if (shield) {
+        try {
+          const off = this.bot.inventory.slots && this.bot.inventory.slots[45];
+          if (!off || !off.name || !off.name.includes('shield')) this.bot.equip(shield, 'off-hand').catch(() => {});
+        } catch (e) {}
+      }
+    } catch (e) {}
+    try {
+      const hp = this.bot.health || 20;
+      const now = Date.now();
+      if (hp < 14 && (!this._lastCombatEat || now - this._lastCombatEat > 8000)) {
+        this._lastCombatEat = now;
+        const items = (this.bot.inventory && this.bot.inventory.items()) || [];
+        const heal = items.find(i => i.name && (
+          i.name.includes('golden_apple') || i.name.includes('enchanted_golden') ||
+          i.name.includes('potion') || i.name.includes('golden_carrot') || i.name.includes('cooked_beef')
+        ));
+        if (heal) {
+          this.bot.equip(heal, 'hand').then(() => this.bot.consume().catch(() => {})).catch(() => {});
+        }
+      }
+    } catch (e) {}
+    try {
+      if (target && target.position && this.bot.entity) {
+        const dist = this.bot.entity.position.distanceTo(target.position);
+        this._tryBowShot(target, dist);
+      }
+    } catch (e) {}
+  }
+
+  _tryBowShot(target, dist) {
+    // Ranged attempt: bow + arrow + 10-30m. Best-effort draw-and-release, melee stays primary.
+    const now = Date.now();
+    if (dist < 10 || dist > 30) return;
+    if (this._lastBowShot && now - this._lastBowShot < 5000) return;
+    try {
+      const items = (this.bot.inventory && this.bot.inventory.items()) || [];
+      const bow = items.find(i => i.name && i.name.includes('bow') && !i.name.includes('crossbow'));
+      const arrow = items.find(i => i.name && i.name.includes('arrow'));
+      if (!bow || !arrow) return;
+      this._lastBowShot = now;
+      this.bot.equip(bow, 'hand').then(() => {
+        try { this.bot.lookAt(target.position.offset(0, 1.2, 0), true).catch(() => {}); } catch (e) {}
+        try { this.bot.activateItem(); } catch (e) { return; }
+        setTimeout(() => {
+          try { this.bot.deactivateItem(); } catch (e) {}
+          try { this._equipBestWeapon(); } catch (e) {}
+        }, 1200);
+      }).catch(() => {});
+    } catch (e) {}
   }
 
   _giveItem(username, itemName) {
@@ -1478,18 +1606,41 @@ class AgnesAgent {
 
   _attackTarget(mobType) {
     if (!this.bot.entity || !this.bot.entities) { this._chat('enna aachu da?'); return; }
+    // Retreat + eat first if critical (human-like survival)
+    try {
+      if ((this.bot.health || 20) < 8) {
+        this._eat(true);
+        if ((this.bot.health || 20) < 6) { this._chat('uyire kapathuren da aprom adikaren'); return; }
+      }
+    } catch (e) {}
+    // 1) Named player target (duel / fun fight): "attack that <player>" or "attack player <name>"
+    const q = String(mobType || '').toLowerCase().replace(/^player\s+/, '').trim();
+    if (q && q !== 'nearest') {
+      try {
+        const pname = Object.keys(this.bot.players || {}).find(n => n.toLowerCase() === q || n.toLowerCase().includes(q));
+        if (pname && this.bot.players[pname] && this.bot.players[pname].entity) {
+          const target = this.bot.players[pname].entity;
+          if (pname.toLowerCase() === (this.bot.username || '').toLowerCase()) { this._chat('enna naane adichika mudiyathu da'); return; }
+          this._combatTarget = target;
+          this._equipBestWeapon();
+          this._chat(`va da ${pname} kothikaren paaru`);
+          this._engageTarget(target);
+          return;
+        }
+      } catch (e) {}
+    }
     const hostiles = Object.values(this.bot.entities).filter(e => this._isHostileMob(e));
     if (hostiles.length === 0) {
       this._chat('eda ethum illa da');
       return;
     }
     let target;
-    if (mobType === 'nearest') {
+    if (!q || q === 'nearest') {
       target = hostiles.sort((a, b) =>
         a.position.distanceTo(this.bot.entity.position) - b.position.distanceTo(this.bot.entity.position)
       )[0];
     } else {
-      target = hostiles.find(e => e.name && e.name.toLowerCase().includes(mobType.toLowerCase()));
+      target = hostiles.find(e => e.name && e.name.toLowerCase().includes(q));
     }
     if (!target) {
       this._chat('atha pakanum da');
@@ -1499,6 +1650,11 @@ class AgnesAgent {
     this._combatTarget = target;
     this._equipBestWeapon();
     this._chat(`va da kothikaren, ${target.name}`);
+    this._engageTarget(target);
+  }
+
+  _engageTarget(target) {
+    this._combatLoadout(target);
     if (this.bot.pvp && typeof this.bot.pvp.attack === 'function') {
       try { this.bot.pvp.attack(target); } catch (e) { console.error('[AGNES] pvp attack error:', e.message); }
     } else {
@@ -1635,10 +1791,23 @@ class AgnesAgent {
 
   stop() {
     this.running = false;
-    this._saveHomes();
-    this._saveWaypoints();
+    try { this._saveHomes(); } catch (e) {}
+    try { this._saveWaypoints(); } catch (e) {}
+    try { this._saveMovementMode(); } catch (e) {}
     if (this._spawnDigInterval) clearInterval(this._spawnDigInterval);
     if (this._greetInterval) clearInterval(this._greetInterval);
+    if (this._pathfindTimer) { clearTimeout(this._pathfindTimer); this._pathfindTimer = null; }
+    if (this._parkourJumpTimer) { clearTimeout(this._parkourJumpTimer); this._parkourJumpTimer = null; }
+    try { if (this.bot && this.bot.pathfinder) this.bot.pathfinder.setGoal(null); } catch (e) {}
+    try {
+      if (this.bot) {
+        this.bot.setControlState('forward', false);
+        this.bot.setControlState('jump', false);
+        this.bot.setControlState('sprint', false);
+        this.bot.setControlState('sneak', false);
+      }
+    } catch (e) {}
+    try { if (this.systems && this.systems.memory && this.systems.memory.store) this.systems.memory.store.close(); } catch (e) {}
   }
 }
 

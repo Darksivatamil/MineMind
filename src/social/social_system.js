@@ -58,9 +58,11 @@ class SocialSystem {
     rel[metric] = Math.min(1, Math.max(0, (rel[metric] ?? 0) + delta));
   }
 
-  recordInteraction(username, type) {
+  recordInteraction(username, type, message) {
     if (!this.interactionTypes.includes(type)) return;
-    if (type === 'chat') this.memory.recordChat(username, `[${type}]`);
+    // Chat goes through SocialMemory with the real text (no "[chat]" pollution);
+    // other types bump the interaction counter.
+    if (type === 'chat') this.memory.recordChat(username, message || '');
     else this.memory.getPlayer(username).interactionCount++;
     const delta = this._getInteractionDelta(type);
     for (const [metric, change] of Object.entries(delta)) {
@@ -89,14 +91,14 @@ class SocialSystem {
     if (this.gossipLog.length > 100) this.gossipLog.shift();
   }
 
-  getOverallSocialScore() {
-    const players = this.memory.getAllPlayers();
-    if (players.length === 0) return 0.5;
-    let total = 0;
-    for (const p of players) {
-      total += this.memory.getRelationshipScore(p);
-    }
-    return total / players.length;
+  getGossipAbout(username, count) {
+    // Read-back for the previously write-only gossip log (used by chat context)
+    const q = String(username || '').toLowerCase();
+    const hits = this.gossipLog.filter(g =>
+      (g.target && String(g.target).toLowerCase() === q) ||
+      (g.topic && String(g.topic).toLowerCase().includes(q))
+    );
+    return hits.slice(-(count || 3));
   }
 
   onPlayerJoined(player) {
