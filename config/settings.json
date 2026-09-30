@@ -1,0 +1,42 @@
+{
+  "owner": "Player",
+  "host": "localhost",
+  "port": 3344,
+  "username": "AGNES",
+  "auth": "offline",
+  "version": "1.21.11",
+  "autoReconnect": true,
+  "reconnectDelayMs": 5000,
+
+  "llm": {
+    "primary": "gemini",
+    "fallback": "gemini",
+    "geminiModel": "gemini-3.5-flash",
+    "temperature": 0.6,
+    "maxTokens": 400
+  },
+
+  "loop": {
+    "decisionIntervalMs": 12000,
+    "decisionsPerMinute": 5,
+    "actionTimeoutMs": 15000,
+    "maxRepairRetries": 1,
+    "logDecisions": true
+  },
+
+  "governor": {
+    "enabled": true,
+    "healthFloor": 6,
+    "yFloor": -59,
+    "minConfidence": 0.15,
+    "blockBlacklist": ["bedrock", "lava", "magma_block", "nether_portal", "end_portal"],
+    "protectOwner": true
+  },
+
+  "actions": {
+    "exploreRadius": 32,
+    "followDistance": 3,
+    "fleeDistance": 16,
+    "mineMaxCount": 16
+  }
+}
