@@ -1,40 +1,57 @@
 'use strict';
 /**
- * action_executor.js — the *only* place a model decision becomes a real
- * mineflayer call.
- *
- * Contract:
- *   execute(bot, decision, opts) -> Promise<{ok, action, detail?, error?}>
+ * action_executor.js — the ONLY place a decision becomes a real mineflayer call.
  *
  * Guarantees:
  *   - unknown actions are rejected here even if they slipped past validation
- *   - every action is time-boxed (opts.actionTimeoutMs) so one bad action can
- *     never wedge the decision loop
- *   - actions that need a missing precondition (no food, no hostiles, no
- *     pathfinder) fail *cleanly* with a reason the loop can learn from
- *   - nothing here is invented: if a target is not present in the world, the
- *     action reports "no target" instead of fabricating success
+ *   - every action is time-boxed so one bad action can never wedge the loop
+ *   - a missing precondition fails *cleanly* with a reason memory can learn from
+ *     (this is what stops the bot retrying a dead end forever)
+ *   - nothing is invented: if the target isn't in the world, it reports
+ *     "no target" instead of faking success
  */
 
 const { Vec3 } = require('vec3');
 
-/** Run a task with a hard timeout so a stuck action can't block the loop. */
-function withTimeout(promise, ms, label) {
+const HOSTILE_NAMES = new Set([
+  'zombie', 'skeleton', 'creeper', 'spider', 'cave_spider', 'enderman', 'slime',
+  'magma_cube', 'blaze', 'wither_skeleton', 'husk', 'drowned', 'phantom',
+  'pillager', 'vindicator', 'ravager', 'witch', 'stray',
+]);
+
+const MINEABLE = new Set([
+  'stone', 'cobblestone', 'coal_ore', 'iron_ore', 'copper_ore', 'gold_ore',
+  'diamond_ore', 'emerald_ore', 'redstone_ore', 'lapis_ore', 'oak_log',
+  'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log',
+  'sand', 'dirt', 'gravel', 'clay', 'grass_block', 'deepslate', 'andesite',
+]);
+
+/** Hard-timeout wrapper so a stuck action can never wedge the decision loop. */
+function timed(promise, ms, label) {
   let timer;
-  return Promise.race([
-    Promise.resolve(promise).finally(() => clearTimeout(timer)),
-    new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-    }),
-  ]);
+  const p = Promise.resolve(promise);
+  return new Promise((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      }
+    );
+  });
 }
 
-function nearestHostile(bot, maxDist = 12) {
+function nearestHostile(bot, maxDist = 12, name = null) {
   let best = null;
   let bestD = maxDist;
-  for (const e of Object.values(bot.entities)) {
+  for (const e of Object.values(bot.entities || {})) {
     if (!e || e.type !== 'mob' || !e.position) continue;
-    if (e.name !== 'zombie' && e.name !== 'skeleton' && e.name !== 'spider' && e.name !== 'creeper' && e.name !== 'husk' && e.name !== 'drowned' && e.name !== 'slime') continue;
+    if (!HOSTILE_NAMES.has(e.name)) continue;
+    if (name && e.name !== name) continue;
     const d = e.position.distanceTo(bot.entity.position);
     if (d < bestD) {
       bestD = d;
@@ -47,15 +64,13 @@ function nearestHostile(bot, maxDist = 12) {
 function nearestDroppedItem(bot, maxDist = 10) {
   let best = null;
   let bestD = maxDist;
-  for (const e of Object.values(bot.entities)) {
-    if (!e || e.position) {
-      if (e && (e.type === 'item' || e.type === 'object')) {
-        const d = e.position.distanceTo(bot.entity.position);
-        if (d < bestD) {
-          bestD = d;
-          best = e;
-        }
-      }
+  for (const e of Object.values(bot.entities || {})) {
+    if (!e || !e.position) continue;
+    if (e.type !== 'item' && e.type !== 'object') continue;
+    const d = e.position.distanceTo(bot.entity.position);
+    if (d < bestD) {
+      bestD = d;
+      best = e;
     }
   }
   return best;
@@ -69,10 +84,9 @@ function findBlock(bot, name, radius = 12) {
   for (let dx = -r; dx <= r; dx++) {
     for (let dy = -r; dy <= r; dy++) {
       for (let dz = -r; dz <= r; dz++) {
-        const p = new Vec3(origin.x + dx, origin.y + dy, origin.z + dz);
         let b;
         try {
-          b = bot.blockAt(p);
+          b = bot.blockAt(new Vec3(origin.x + dx, origin.y + dy, origin.z + dz));
         } catch {
           continue;
         }
@@ -89,14 +103,39 @@ function findBlock(bot, name, radius = 12) {
   return best;
 }
 
-/** Best pickaxe-ish tool we are holding, or null. */
 function bestToolFor(bot, blockName) {
-  const order =
-    blockName && /log|planks|wood/.test(blockName)
-      ? ['iron_axe', 'stone_axe', 'diamond_axe', 'golden_axe', 'wooden_axe']
-      : ['iron_pickaxe', 'diamond_pickaxe', 'stone_pickaxe', 'golden_pickaxe', 'wooden_pickaxe'];
+  const wood = blockName && /log|planks|wood/.test(blockName);
+  const order = wood
+    ? ['iron_axe', 'diamond_axe', 'stone_axe', 'golden_axe', 'wooden_axe']
+    : ['iron_pickaxe', 'diamond_pickaxe', 'stone_pickaxe', 'golden_pickaxe', 'wooden_pickaxe'];
   for (const t of order) {
     if (bot.inventory.items().some((i) => i.name === t)) return t;
+  }
+  return null;
+}
+
+/** Find a safe, walkable destination in a compass direction. */
+function directionTarget(bot, dir, reach = 12) {
+  const map = {
+    north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0],
+    northeast: [1, -1], northwest: [-1, -1], southeast: [1, 1], southwest: [-1, 1],
+  };
+  const v = map[String(dir).toLowerCase()];
+  if (!v) return null;
+  const p = bot.entity.position;
+  for (const d of [reach, reach - 3, reach - 6]) {
+    const t = new Vec3(p.x + v[0] * d, p.y, p.z + v[1] * d);
+    let feet;
+    let ground;
+    try {
+      feet = bot.blockAt(t);
+      ground = bot.blockAt(t.offset(0, -1, 0));
+    } catch {
+      continue;
+    }
+    const feetOk = !feet || feet.boundingBox !== 'block';
+    const groundOk = ground && ground.boundingBox === 'block' && ground.name !== 'lava';
+    if (feetOk && groundOk) return t;
   }
   return null;
 }
@@ -106,71 +145,181 @@ function createExecutor(opts = {}) {
     logger = { info() {}, warn() {}, error() {}, debug() {} },
     actionTimeoutMs = 15000,
     settings = {},
+    memory = null,
   } = opts;
 
-  const actionsCfg = settings.actions || {};
-  const exploreRadius = actionsCfg.exploreRadius ?? 32;
-  const followDistance = actionsCfg.followDistance ?? 3;
-  const fleeDistance = actionsCfg.fleeDistance ?? 16;
-  const mineMaxCount = actionsCfg.mineMaxCount ?? 16;
+  const a = settings.actions || {};
+  const followDistance = a.followDistance ?? 3;
+  const mineMaxCount = a.mineMaxCount ?? 16;
+  /** Swing cadence. Real MC allows ~1.8 swings/sec; tests set this to ~0. */
+  const swingDelayMs = a.swingDelayMs ?? 550;
+  /** Idle pause. */
+  const idleMs = a.idleMs ?? 600;
 
-  /** Each handler returns a detail string; the runner adds the envelope. */
+  /**
+   * Snapshot a bot's position so a handler can measure whether it moved.
+   * `bot` is passed in on purpose: handlers receive it as an argument, and
+   * closing over it here would silently capture `undefined` — which made every
+   * movement handler report "walked nowhere" no matter how far the bot went.
+   */
+  const anchor = (b) => {
+    try {
+      const p = b.entity.position;
+      return { x: p.x, y: p.y, z: p.z };
+    } catch {
+      return null;
+    }
+  };
+
   const handlers = {
-    async idle() {
-      bot.look ? bot.look(true) : null;
-      await sleep(400);
-      return { detail: 'looked around' };
+    async idle(bot) {
+      const before = anchor(bot);
+      try {
+        await timed(new Promise((r) => setTimeout(r, idleMs)), Math.max(2000, idleMs * 4), "idle");
+      } catch { /* ignore */ }
+      return { detail: 'paused', pos: before };
     },
 
-    async explore(bot) {
+    async explore(bot, decision) {
       if (!bot.pathfinder) return { error: 'pathfinder plugin not loaded' };
-      const pos = bot.entity.position;
-      const angle = Math.random() * Math.PI * 2;
-      const r = 8 + Math.random() * (exploreRadius - 8);
-      const dest = new Vec3(pos.x + Math.cos(angle) * r, pos.y, pos.z + Math.sin(angle) * r);
-      await withTimeout(bot.pathfinder.walkTo(dest), actionTimeoutMs, 'explore');
-      return { detail: `walked ~${Math.round(r)} blocks` };
+      const from = anchor(bot);
+      // Prefer a direction the observer confirmed is clear; fall back to any.
+      const clear = (decision.direction && String(decision.direction).toLowerCase()) || null;
+      let dest = clear ? directionTarget(bot, clear, a.exploreRadius ?? 24) : null;
+      if (!dest) {
+        const opts2 = ['north', 'south', 'east', 'west', 'northeast', 'northwest', 'southeast', 'southwest'];
+        for (const d of opts2) {
+          dest = directionTarget(bot, d, a.exploreRadius ?? 24);
+          if (dest) break;
+        }
+      }
+      if (!dest) {
+        // Nowhere walkable in a straight line — try a generic walk, pathfinder will route.
+        const p = bot.entity.position;
+        dest = new Vec3(p.x + Math.floor(Math.random() * 12) - 6, p.y, p.z + Math.floor(Math.random() * 12) - 6);
+      }
+      try {
+        await timed(bot.pathfinder.walkTo(dest), actionTimeoutMs, 'explore');
+      } catch (err) {
+        return { error: `explore failed: ${err.message}` };
+      }
+      const to = anchor(bot);
+      // float distance: rounding here used to discard short-but-real walks and
+      // report "blocked" when the bot had in fact moved.
+      const moved = from && to ? Math.hypot(to.x - from.x, to.z - from.z) : 0;
+      if (moved < 1.5) return { error: `walked nowhere (moved ${moved.toFixed(1)} blocks)` };
+      return { detail: `explored ${moved.toFixed(1)} blocks`, moved };
+    },
+
+    async goto(bot, decision) {
+      if (!bot.pathfinder) return { error: 'pathfinder plugin not loaded' };
+      const x = Number(decision.target?.x ?? (typeof decision.target === 'object' ? decision.target.x : NaN));
+      const z = Number(decision.target?.z ?? (typeof decision.target === 'object' ? decision.target.z : NaN));
+      if (!Number.isFinite(x) || !Number.isFinite(z)) return { error: 'goto needs numeric x/z' };
+      const dest = new Vec3(x, bot.entity.position.y, z);
+      try {
+        await timed(bot.pathfinder.walkTo(dest), actionTimeoutMs, 'goto');
+      } catch (err) {
+        return { error: `goto failed: ${err.message}` };
+      }
+      return { detail: `went to ${Math.round(x)},${Math.round(z)}` };
     },
 
     async follow(bot) {
       const ownerName = bot.ownerName || bot._minemindOwner;
-      const owner = ownerName ? bot.players[ownerName] : null;
+      const owner = ownerName ? bot.players?.[ownerName] : null;
       if (!owner?.entity?.position) return { error: 'owner is not visible' };
       if (!bot.pathfinder) return { error: 'pathfinder plugin not loaded' };
-      const dest = owner.entity.position.offset(0, 0, -followDistance);
-      await withTimeout(bot.pathfinder.walkTo(dest), actionTimeoutMs, 'follow');
-      return { detail: `walked to ${ownerName}` };
+      const d = owner.entity.position.distanceTo(bot.entity.position);
+      if (d <= followDistance + 1) return { detail: 'already with owner' };
+      try {
+        await timed(bot.pathfinder.walkTo(owner.entity.position, 1), actionTimeoutMs, 'follow');
+      } catch (err) {
+        return { error: `follow failed: ${err.message}` };
+      }
+      return { detail: `followed owner` };
     },
 
-    async flee(bot) {
-      const threat = nearestHostile(bot, fleeDistance);
+    async goto_owner(bot) {
+      return handlers.follow(bot);
+    },
+
+    async flee(bot, decision) {
+      const threat = nearestHostile(bot, a.fleeDistance ?? 16, decision.target || null);
       if (!threat) return { error: 'no hostile within flee distance' };
       if (!bot.pathfinder) return { error: 'pathfinder plugin not loaded' };
-      const away = bot.entity.position.offset(threat.position.x - bot.entity.position.x, 0, threat.position.z - bot.entity.position.z);
-      const dest = bot.entity.position.offset(
-        (bot.entity.position.x - threat.position.x) * 3,
-        0,
-        (bot.entity.position.z - threat.position.z) * 3
+      const p = bot.entity.position;
+      const away = new Vec3(
+        p.x + (p.x - threat.position.x) * 3,
+        p.y,
+        p.z + (p.z - threat.position.z) * 3
       );
-      await withTimeout(bot.pathfinder.walkTo(dest), actionTimeoutMs, 'flee');
+      try {
+        await timed(bot.pathfinder.walkTo(away), actionTimeoutMs, 'flee');
+      } catch (err) {
+        return { error: `flee failed: ${err.message}` };
+      }
       return { detail: `fled from ${threat.name}` };
     },
 
-    async attack(bot) {
-      const target = nearestHostile(bot, 4.5);
-      if (!target) return { error: 'no hostile in reach' };
-      bot.attack(target);
-      return { detail: `attacked ${target.name}` };
+    /**
+     * Real combat: walk into range, then keep swinging until the mob dies or
+     * we drop below a safe health floor. v1 only swung once, so the bot never
+     * actually killed anything.
+     */
+    async attack(bot, decision) {
+      const name = decision.target && HOSTILE_NAMES.has(decision.target) ? decision.target : null;
+      const target = nearestHostile(bot, 8, name);
+      if (!target) return { error: 'no hostile in range' };
+
+      // close the distance if we're too far to swing
+      if (target.position.distanceTo(bot.entity.position) > 3.2 && bot.pathfinder) {
+        try {
+          await timed(bot.pathfinder.walkTo(target.position, 2), actionTimeoutMs / 2, 'approach');
+        } catch { /* just swing from here */ }
+      }
+
+      let swings = 0;
+      const deadline = Date.now() + actionTimeoutMs;
+      while (Date.now() < deadline && swings < 24) {
+        if (!target.isValid || target.health <= 0) break;
+        const d = target.position.distanceTo(bot.entity.position);
+        if (d > 3.2) {
+          // it moved away — chase briefly
+          if (bot.pathfinder) {
+            try {
+              await timed(bot.pathfinder.goto(target.position, 2).catch(() => {}), 2500, 'chase');
+            } catch { /* ignore */ }
+          }
+        } else {
+          try {
+            bot.attack(target);
+            swings++;
+          } catch { /* ignore */ }
+        }
+        await new Promise((r) => setTimeout(r, swingDelayMs)); // ~1.8 swings/sec in-game
+      }
+      const killed = !target.isValid || target.health <= 0;
+      if (swings === 0) return { error: 'never got in range to swing' };
+      return {
+        detail: killed ? `killed ${target.name} in ${swings} swings` : `hit ${target.name} ${swings}x`,
+        killed,
+        swings,
+      };
     },
 
     async mine(bot, decision) {
-      const names = ['stone', 'cobblestone', 'coal_ore', 'iron_ore', 'copper_ore', 'oak_log', 'birch_log', 'spruce_log', 'sand', 'dirt'];
-      const wanted = decision.target && names.includes(decision.target) ? decision.target : null;
-
       let block = null;
-      if (wanted) {
-        block = findBlock(bot, wanted, 12);
-      } else {
+      const want = typeof decision.target === 'string' ? decision.target : null;
+      if (want) {
+        block = findBlock(bot, want, 12);
+        if (!block && MINEABLE.has(want)) {
+          // model asked for a mineable block that isn't visible -> be honest
+          return { error: `no ${want} within 12 blocks` };
+        }
+      }
+      if (!block) {
+        const names = ['oak_log', 'birch_log', 'spruce_log', 'stone', 'cobblestone', 'dirt', 'coal_ore', 'copper_ore', 'iron_ore'];
         for (const n of names) {
           block = findBlock(bot, n, 10);
           if (block) break;
@@ -178,7 +327,6 @@ function createExecutor(opts = {}) {
       }
       if (!block) return { error: 'no mineable block in range' };
 
-      // equip the best tool we have for it
       const tool = bestToolFor(bot, block.name);
       if (tool) {
         try {
@@ -187,16 +335,14 @@ function createExecutor(opts = {}) {
       }
 
       try {
-        await withTimeout(bot.dig(block), actionTimeoutMs, 'mine');
-        return { detail: `mined ${block.name}` };
+        await timed(bot.dig(block), actionTimeoutMs, 'mine');
+        return { detail: `mined ${block.name}`, item: block.name };
       } catch (err) {
-        // out of reach / no tool → try to walk closer once
         if (bot.pathfinder) {
           try {
-            const near = block.position.offset(0, 0, 2);
-            await withTimeout(bot.pathfinder.walkTo(near), actionTimeoutMs, 'approach');
-            await withTimeout(bot.dig(block), actionTimeoutMs, 'mine');
-            return { detail: `approached and mined ${block.name}` };
+            await timed(bot.pathfinder.walkTo(block.position.offset(0, 0, 2)), actionTimeoutMs, 'approach');
+            await timed(bot.dig(block), actionTimeoutMs, 'mine');
+            return { detail: `approached and mined ${block.name}`, item: block.name };
           } catch {
             /* fall through */
           }
@@ -205,25 +351,80 @@ function createExecutor(opts = {}) {
       }
     },
 
-    async eat(bot) {
-      const foodItem = bot.foodItems().find((i) => i.name !== 'rotten_flesh');
-      if (!foodItem) return { error: 'no food in inventory' };
-      if (bot.food >= 18) return { error: 'not hungry yet' };
-      await withTimeout(bot.consume(), actionTimeoutMs, 'eat');
-      return { detail: `ate ${foodItem.name}` };
+    async dig(bot, decision) {
+      const depth = Math.min(5, Math.max(1, Number(decision.target) || 1));
+      const p = bot.entity.position;
+      let dug = 0;
+      for (let i = 0; i < depth; i++) {
+        const below = bot.blockAt(new Vec3(p.x, p.y - 1 - i, p.z));
+        if (!below || below.name === 'bedrock' || below.name === 'water' || below.name === 'lava') break;
+        const tool = bestToolFor(bot, below.name);
+        if (tool) {
+          try {
+            await bot.equip(bot.inventory.items().find((i) => i.name === tool), 'hand');
+          } catch { /* ignore */ }
+        }
+        try {
+          await timed(bot.dig(below), actionTimeoutMs, 'dig');
+          dug++;
+        } catch (err) {
+          return { error: `could not dig: ${err.message}`, dug };
+        }
+      }
+      if (!dug) return { error: 'nothing diggable below' };
+      return { detail: `dug down ${dug}`, dug };
+    },
+
+    async gather(bot) {
+      const item = nearestDroppedItem(bot, 10);
+      if (!item) return { error: 'no dropped items nearby' };
+      if (!bot.pathfinder) return { error: 'pathfinder plugin not loaded' };
+      try {
+        await timed(bot.pathfinder.walkTo(item.position, 1), actionTimeoutMs, 'gather');
+      } catch (err) {
+        return { error: `gather failed: ${err.message}` };
+      }
+      return { detail: 'collected a dropped item' };
     },
 
     async craft(bot, decision) {
-      if (!bot.recipesFor) return { error: 'recipe plugin not loaded' };
-      const itemName = decision.target;
+      const itemName = typeof decision.target === 'string' ? decision.target : null;
       if (!itemName) return { error: 'craft needs a target item' };
-      const item = bot.registry.items[itemName];
+      const item = bot.registry?.items?.[itemName];
       if (!item) return { error: `unknown item "${itemName}"` };
-      const recipe = bot.recipesFor(item.id, null, 1).size > 0 ? Array.from(bot.recipesFor(item.id, null, 1))[0] : null;
-      if (!recipe) return { error: `no recipe for ${itemName}` };
-      const craftingTable = findBlock(bot, 'crafting_table', 4);
-      await withTimeout(bot.craft(recipe, 1, craftingTable ? craftingTable.position : null), actionTimeoutMs, 'craft');
-      return { detail: `crafted ${itemName}` };
+      let recipe = null;
+      try {
+        const r = bot.recipesAll?.().find((x) => x.result === item.id);
+        recipe = r || null;
+      } catch { /* recipe plugin missing */ }
+      if (!recipe) return { error: `no recipe known for ${itemName} (missing materials?)` };
+
+      const table = findBlock(bot, 'crafting_table', 4);
+      if (!table && !bot.inventory.items().some((i) => i.name === 'crafting_table')) {
+        return { error: 'need a crafting table nearby' };
+      }
+      const ref = table ? table.position : null;
+      try {
+        await timed(bot.craft(recipe, 1, ref), actionTimeoutMs, 'craft');
+      } catch (err) {
+        return { error: `craft failed: ${err.message}` };
+      }
+      return { detail: `crafted ${itemName}`, item: itemName };
+    },
+
+    async equip(bot, decision) {
+      const prefer = decision.target
+        ? [decision.target]
+        : ['diamond_sword', 'iron_sword', 'stone_sword', 'diamond_pickaxe', 'iron_pickaxe', 'stone_pickaxe', 'diamond_axe', 'iron_axe', 'stone_axe'];
+      for (const p of prefer) {
+        const it = bot.inventory.items().find((i) => i.name === p);
+        if (!it) continue;
+        try {
+          await bot.equip(it, 'hand');
+          return { detail: `equipped ${p}` };
+        } catch { /* try next */ }
+      }
+      return { error: 'nothing better to equip' };
     },
 
     async place(bot) {
@@ -233,57 +434,79 @@ function createExecutor(opts = {}) {
       if (!ref) return { error: 'no block to place against' };
       const dest = ref.position.offset(0, 1, 0);
       try {
-        await withTimeout(bot.placeBlock(ref, dest), actionTimeoutMs, 'place');
-        return { detail: `placed ${held.name}` };
+        await timed(bot.placeBlock(ref, dest), actionTimeoutMs, 'place');
       } catch (err) {
         return { error: `could not place: ${err.message}` };
       }
+      return { detail: `placed ${held.name}` };
     },
 
-    async gather(bot) {
-      const item = nearestDroppedItem(bot, 10);
-      if (!item) return { error: 'no dropped items nearby' };
-      if (!bot.pathfinder) return { error: 'pathfinder plugin not loaded' };
-      await withTimeout(bot.pathfinder.walkTo(item.position, 1), actionTimeoutMs, 'gather');
-      return { detail: 'walked to a dropped item' };
-    },
-
-    async equip(bot) {
-      const prefer = ['diamond_sword', 'iron_sword', 'stone_sword', 'iron_pickaxe', 'stone_pickaxe', 'diamond_pickaxe'];
-      for (const p of prefer) {
-        const it = bot.inventory.items().find((i) => i.name === p);
-        if (it) {
-          try {
-            await bot.equip(it, 'hand');
-            return { detail: `equipped ${p}` };
-          } catch { /* try next */ }
+    async build(bot, decision) {
+      const shape = ['platform', 'wall', 'pillar'].includes(decision.target) ? decision.target : 'wall';
+      const count = Math.min(24, Math.max(2, Number(decision.count) || 8));
+      const held = bot.heldItem;
+      if (!held || held.type === -1) return { error: 'holding nothing to build with' };
+      let placed = 0;
+      const base = bot.entity.position.offset(0, -1, 0).offset(0, 1, 0);
+      try {
+        for (let i = 0; i < count; i++) {
+          const ref = shape === 'pillar'
+            ? base.offset(0, placed, 0)
+            : base.offset(placed, 0, 0);
+          const existing = bot.blockAt(ref);
+          if (existing && existing.boundingBox === 'block') {
+            placed++;
+            continue;
+          }
+          const support = bot.blockAt(ref.offset(0, -1, 0));
+          if (!support) break;
+          await timed(bot.placeBlock(support, ref), 3000, 'build');
+          placed++;
         }
+      } catch (err) {
+        return { error: `build stopped: ${err.message}`, placed };
       }
-      return { error: 'nothing better to equip' };
+      if (!placed) return { error: 'could not place any blocks' };
+      return { detail: `built ${shape} (${placed} blocks)`, placed };
+    },
+
+    async eat(bot, decision) {
+      let foodItem = null;
+      if (typeof decision.target === 'string') {
+        foodItem = bot.inventory.items().find((i) => i.name === decision.target);
+      }
+      if (!foodItem) foodItem = bot.foodItems().find((i) => i.name !== 'rotten_flesh');
+      if (!foodItem) return { error: 'no food in inventory' };
+      try {
+        await timed(bot.consume(), actionTimeoutMs, 'eat');
+      } catch (err) {
+        return { error: `could not eat: ${err.message}` };
+      }
+      return { detail: `ate ${foodItem.name}` };
     },
 
     async sleep(bot) {
-      const bed = findBlock(bot, 'red_bed', 4) || findBlock(bot, 'blue_bed', 4) || findBlock(bot, 'bed', 4);
+      const bed = findBlock(bot, 'red_bed', 5) || findBlock(bot, 'blue_bed', 5) || findBlock(bot, 'bed', 5);
       if (!bed) return { error: 'no bed nearby' };
       try {
-        await bot.sleep(bed);
-        return { detail: 'slept' };
+        await timed(bot.sleep(bed), actionTimeoutMs, 'sleep');
       } catch (err) {
         return { error: `could not sleep: ${err.message}` };
       }
+      return { detail: 'slept until morning' };
     },
 
     async talk(bot, decision) {
       const msg = String(decision.target || '').slice(0, 120);
       if (!msg) return { error: 'talk needs a message' };
-      bot.chat(msg);
+      try {
+        bot.chat(msg);
+      } catch (err) {
+        return { error: `chat failed: ${err.message}` };
+      }
       return { detail: `said: ${msg}` };
     },
   };
-
-  function sleep(ms) {
-    return new Promise((r) => setTimeout(r, ms));
-  }
 
   /**
    * Execute a validated decision.
@@ -293,22 +516,18 @@ function createExecutor(opts = {}) {
     const started = Date.now();
     const action = decision && decision.action;
     const handler = handlers[action];
-    if (!handler) {
-      return { ok: false, action: String(action), error: 'unknown action', ms: Date.now() - started };
-    }
+    if (!handler) return { ok: false, action: String(action), error: 'unknown action', ms: Date.now() - started };
     try {
       const res = await handler(bot, decision);
       const ms = Date.now() - started;
-      if (res && res.error) {
-        return { ok: false, action, error: res.error, ms };
-      }
+      if (res && res.error) return { ok: false, action, error: res.error, detail: res.detail, ms };
       return { ok: true, action, detail: res?.detail, ms };
     } catch (err) {
       return { ok: false, action, error: err.message, ms: Date.now() - started };
     }
   }
 
-  return { execute, handlers, names: Object.keys(handlers) };
+  return { execute, handlers, names: Object.keys(handlers), findBlock, nearestHostile, directionTarget };
 }
 
-module.exports = { createExecutor };
+module.exports = { createExecutor, findBlock, nearestHostile, directionTarget };

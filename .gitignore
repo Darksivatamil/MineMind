@@ -9,6 +9,11 @@ node_modules/
 logs/
 *.log
 
+# Agent memory — learned at runtime, personal to each install.
+# Keep the folder, do not commit what this install learned.
+data/*.jsonl
+data/*.json
+
 # OS / editor noise
 .DS_Store
 Thumbs.db
@@ -19,3 +24,4 @@ Thumbs.db
 # Test artifacts
 /tmp/
 coverage/
+install-termux.sh

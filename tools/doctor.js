@@ -66,23 +66,51 @@ console.log(`  host=${host}  port=${port}  version=${version}  auth=${auth}`);
   console.log('  This check cannot auto-detect — only a real login attempt proves it.');
   console.log('  A kick reading "requires Fabric Loader and Fabric API" means this.');
 
-  console.log('\n[llm]');
+  console.log('\n[llm — live key check]');
   try {
-    const { createProvider } = require(path.join(ROOT, 'src/llm/provider'));
-    const p = createProvider({ apiKey: process.env.GEMINI_API_KEY, model: settings.llm?.geminiModel });
-    ok(`provider ready (model: ${p.model}, key: ${p.hasKey ? 'present' : 'MISSING'})`);
+    const { buildProviders } = require(path.join(ROOT, 'src/llm/orchestrator'));
+    const providers = buildProviders(settings.llm || {}, process.env, { warn() {}, info() {}, error() {}, debug() {} });
+    const real = providers.filter((p) => p.name !== 'mock');
+    if (!real.length) {
+      bad('no real model provider configured — the bot would run on the heuristic fallback (not AI)');
+      console.log('       Set GEMINI_API_KEY (aistudio.google.com) or OPENROUTER_API_KEY in .env');
+    }
+    for (const p of real) {
+      process.stdout.write(`  ...  ${p.name} (${p.model}) `);
+      const r = await p.generate({
+        system: 'You output JSON only.',
+        user: 'Reply with exactly: {"ok":true}',
+        temperature: 0,
+        maxTokens: 60,
+        json: true,
+      });
+      if (r.ok) {
+        ok(`${p.name} reachable`);
+      } else if (r.kind === 'auth') {
+        bad(`${p.name} key is INVALID (${r.status}): ${String(r.error).slice(0, 90)}`);
+        console.log('       This key cannot call the model. The bot will fall back to heuristics.');
+        console.log('       For Gemini, use a key from https://aistudio.google.com/apikey');
+      } else if (r.kind === 'quota') {
+        warn(`${p.name} quota exceeded — free tier is 20 req/min. Wait ~1 minute.`);
+      } else {
+        bad(`${p.name} failed (${r.kind}): ${String(r.error).slice(0, 90)}`);
+      }
+    }
+    console.log('  \x1b[2mThe bot always has a heuristic fallback, so it never stalls —\x1b[0m');
+    console.log('  \x1b[2mbut a fallback run is NOT the model playing. Check the log for "via: mock".\x1b[0m');
   } catch (e) {
-    bad(`provider failed to initialise: ${e.message}`);
+    bad(`llm check failed to run: ${e.message}`);
   }
 
   console.log('\n[docs]');
-  for (const f of ['PLAN.md', 'CONTRACTS.md', 'ARCHITECTURE.md', 'PROGRESS.md', 'SETUP.md']) {
+  for (const f of ['CONTROL.md', 'FEATURES.md', 'PLAN.md', 'CONTRACTS.md', 'ARCHITECTURE.md', 'SETUP.md']) {
     fs.existsSync(path.join(ROOT, f)) ? ok(f) : warn(`${f} missing`);
   }
 
   console.log('\n[next]');
-  console.log('  1. make sure a Minecraft server is listening on ' + host + ':' + port);
-  console.log('  2. run:  npm start');
+  console.log(`  1. make sure a Minecraft server is listening on ${host}:${port}`);
+  console.log('  2. verify your AI key works:   npm run verify:key');
+  console.log('  3. run the bot:                npm start');
   console.log('');
   process.exit(0);
 })();

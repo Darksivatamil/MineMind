@@ -9,32 +9,65 @@
   "reconnectDelayMs": 5000,
 
   "llm": {
-    "primary": "gemini",
-    "fallback": "gemini",
+    "enabled": ["gemini", "openrouter", "ollama", "mock"],
     "geminiModel": "gemini-3.5-flash",
-    "temperature": 0.6,
-    "maxTokens": 400
+    "openrouterModel": "google/gemini-2.5-flash",
+    "ollamaModel": "llama3.1",
+    "temperature": 0.55,
+    "maxTokens": 320,
+    "timeoutMs": 25000,
+    "retries": 1,
+    "quotaCooldownMs": 180000,
+    "errorCooldownMs": 20000,
+    "mockFallback": true
   },
 
   "loop": {
-    "decisionIntervalMs": 12000,
-    "decisionsPerMinute": 5,
+    "decisionIntervalMs": 6000,
+    "decisionsPerMinute": 8,
     "actionTimeoutMs": 15000,
     "maxRepairRetries": 1,
     "logDecisions": true
+  },
+
+  "observer": {
+    "scanRadius": 8,
+    "entityRadius": 16
+  },
+
+  "planner": {
+    "minIdleTicks": 6
+  },
+
+  "reflex": {
+    "enabled": true,
+    "eatAtHealth": 6,
+    "eatAtFood": 12,
+    "autoFightWithin": 3.2,
+    "fightMinHealth": 8,
+    "creeperPanic": 5,
+    "voidY": -50,
+    "panicDrop": 4
+  },
+
+  "verifier": {
+    "strict": true
   },
 
   "governor": {
     "enabled": true,
     "healthFloor": 6,
     "yFloor": -59,
-    "minConfidence": 0.15,
-    "blockBlacklist": ["bedrock", "lava", "magma_block", "nether_portal", "end_portal"],
-    "protectOwner": true
+    "minConfidence": 0.1,
+    "blockBlacklist": ["bedrock", "lava", "magma_block", "nether_portal", "end_portal", "water", "tnt"],
+    "protectOwner": true,
+    "repair": true,
+    "nightRetreat": true,
+    "avoidPointlessFights": true
   },
 
   "actions": {
-    "exploreRadius": 32,
+    "exploreRadius": 24,
     "followDistance": 3,
     "fleeDistance": 16,
     "mineMaxCount": 16

@@ -193,7 +193,7 @@ To use it more:
 | `main.js` | connects, runs the decision loop, reconnects |
 | `src/ai/observer.js` | turns the real world into a JSON snapshot |
 | `src/llm/provider.js` | the only place that calls Gemini |
-| `src/ai/decision_engine.js` | observe → decide → govern → execute |
+|  `src/ai/autopilot.js` | observe → decide → govern → execute |
 | `src/ai/governor.js` | safety rails that can veto a decision |
 | `src/ai/action_executor.js` | the only place actions reach Minecraft |
 | `config/settings.json` | host, port, version, model, safety limits |

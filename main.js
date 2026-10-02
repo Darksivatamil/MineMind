@@ -4,7 +4,8 @@
  *
  * Boots a real LLM-driven Minecraft player:
  *   connect (mineflayer, offline, localhost:3344)
- *     -> decision loop (observe -> Gemini decides -> governor -> act)
+ *     -> autopilot (reflex -> LLM goal + action -> governor -> execute -> verify)
+ *     -> memory (learns from outcomes)
  *     -> auto-reconnect
  *
  * Run:  npm start
@@ -23,8 +24,12 @@ const { explainKick } = require('./src/net/fabric_compat');
 const { createBus } = require('./src/core/bus');
 const { createLogger } = require('./src/core/logger');
 const { createLoop } = require('./src/core/loop');
+const { createMemory } = require('./src/core/memory');
 const { TRIGGERS, TRIGGER_RULES } = require('./src/core/triggers');
-const { createDecisionEngine } = require('./src/ai/decision_engine');
+const { createAutopilot } = require('./src/ai/autopilot');
+const { createExecutor } = require('./src/ai/action_executor');
+const { createGovernor } = require('./src/ai/governor');
+const { createChat } = require('./src/chat/personality');
 
 const settings = require('./config/settings.json');
 
@@ -50,12 +55,14 @@ function banner() {
 }
 
 let bot = null;
-let engine = null;
+let autopilot = null;
+let memory = null;
+let chat = null;
 let loop = null;
 let stopping = false;
 let fatalModGate = false;
 
-/** Connect (with preflight) and wire the decision loop. */
+/** Connect (with preflight) and wire the autopilot loop. */
 async function connect() {
   if (stopping) return;
 
@@ -88,15 +95,20 @@ async function connect() {
       health: bot.health,
       food: bot.food,
     });
-    startDecisionLoop();
-    bot.chat(`hi ${target.owner}, AGNES inga online ah irukken.`);
+    startAutopilot();
+    try { bot.chat(`hi ${target.owner}, AGNES inga online ah irukken.`); } catch { /* ignore */ }
   });
 
-  bot.on('messagestr', (msg) => {
-    log.info('chat', { from: 'player', msg });
-    bus.emit(TRIGGERS.CHAT_MESSAGE, { message: msg });
-    if (/\bhi\b|\bvanakkam\b|\bhello\b/i.test(msg) && msg.includes(target.owner)) {
-      try { bot.chat('vanakkam da!'); } catch { /* ignore */ }
+  // --- player chat: give the LLM a voice -------------------------------
+  bot.on('messagestr', (msg, sender) => {
+    log.info('chat', { from: sender, msg });
+    bus.emit(TRIGGERS.CHAT_MESSAGE, { message: msg, from: sender });
+    if (chat) {
+      chat.onPlayerMessage(sender, msg).then((reply) => {
+        if (reply) {
+          try { bot.chat(reply); } catch { /* ignore */ }
+        }
+      }).catch(() => { /* ignore */ });
     }
   });
 
@@ -108,6 +120,14 @@ async function connect() {
       bus.emit(TRIGGERS.HEALTH_DROP, { from: lastHealth, to: hp });
     }
     lastHealth = hp;
+  });
+
+  let lastFood = null;
+  bot.on('food', () => {
+    if (lastFood !== null && bot.food <= TRIGGER_RULES.hungerCriticalFood && bot.food < lastFood) {
+      bus.emit(TRIGGERS.HUNGER_CRITICAL, { food: bot.food });
+    }
+    lastFood = bot.food;
   });
 
   const hostileCheck = setInterval(() => {
@@ -132,7 +152,6 @@ async function connect() {
       log.error(`      ${diag.why}`);
       log.error(`fix:  ${diag.fix}`);
       if (diag.id === 'fabric-mod-gate') {
-        // Retrying cannot help — the server refuses us identically every time.
         fatalModGate = true;
         log.error('stopping: a Fabric modded server cannot accept this bot.');
         log.error('Run a VANILLA world (no Fabric API mod) on the same port and start again.');
@@ -160,21 +179,41 @@ async function connect() {
   });
 }
 
-function startDecisionLoop() {
+function startAutopilot() {
   if (loop) return;
-  engine = createDecisionEngine({ bot, settings, logger: log, bus });
+  memory = createMemory({ logger: log });
+  const executor = createExecutor({ logger: log, settings, memory, actionTimeoutMs: settings.loop?.actionTimeoutMs ?? 15000 });
+  const governor = createGovernor({ settings });
+  autopilot = createAutopilot({ bot, settings, logger: log, memory, executor, governor });
+  chat = createChat({ orchestrator: autopilot.orchestrator, logger: log, ownerName: target.owner });
 
   loop = createLoop({
     settings,
     bus,
     logger: log,
-    handler: ({ trigger }) => engine.tick(trigger),
+    handler: ({ trigger, payload }) => autopilot.tick(trigger, payload),
   });
   loop.start();
-  log.info('decision loop started', {
+  log.info('autopilot started', {
     everyMs: settings.loop?.decisionIntervalMs,
     perMinute: settings.loop?.decisionsPerMinute,
+    providers: autopilot.orchestrator.active(),
   });
+
+  // periodic stats so the user can see it working
+  const statsTimer = setInterval(() => {
+    const s = autopilot.stats();
+    log.info('status', {
+      ticks: s.ticks,
+      executed: s.executed,
+      verified: s.verified,
+      failed: s.failed,
+      vetoed: s.vetoed,
+      via: s.bySource,
+      goal: s.planner?.current || '-',
+    });
+  }, 60000);
+  bot.on('end', () => clearInterval(statsTimer));
 }
 
 function scheduleReconnect() {
