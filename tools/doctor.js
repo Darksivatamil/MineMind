@@ -58,6 +58,14 @@ console.log(`  host=${host}  port=${port}  version=${version}  auth=${auth}`);
     console.log('         a phone-hosted world on the same Wi-Fi is NOT localhost here.');
   }
 
+  console.log('\n[modded-server check]');
+  const { MOD_GATE } = require(path.join(ROOT, 'src/net/fabric_compat'));
+  console.log('  If your world uses Fabric/Forge mods, AGNES CANNOT join it.');
+  console.log('  Those servers demand a mod-list handshake this bot cannot perform.');
+  console.log(`  ${MOD_GATE.fix}`);
+  console.log('  This check cannot auto-detect — only a real login attempt proves it.');
+  console.log('  A kick reading "requires Fabric Loader and Fabric API" means this.');
+
   console.log('\n[llm]');
   try {
     const { createProvider } = require(path.join(ROOT, 'src/llm/provider'));

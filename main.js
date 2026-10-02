@@ -19,6 +19,7 @@ const { pathfinder } = require('mineflayer-pathfinder');
 
 const { resolveTarget } = require('./src/net/target');
 const { tcpCheck } = require('./src/net/preflight');
+const { explainKick } = require('./src/net/fabric_compat');
 const { createBus } = require('./src/core/bus');
 const { createLogger } = require('./src/core/logger');
 const { createLoop } = require('./src/core/loop');
@@ -52,6 +53,7 @@ let bot = null;
 let engine = null;
 let loop = null;
 let stopping = false;
+let fatalModGate = false;
 
 /** Connect (with preflight) and wire the decision loop. */
 async function connect() {
@@ -123,10 +125,20 @@ async function connect() {
   bot.on('end', () => clearInterval(hostileCheck));
 
   bot.on('kicked', (reason) => {
-    const s = typeof reason === 'string' ? reason : JSON.stringify(reason);
-    log.error('kicked by server', { reason: s });
-    if (/secure chat|secure profile/i.test(s)) {
-      log.error('hint: server requires secure chat; disable "enable-secure-chat" in server.properties');
+    const { text, diag } = explainKick(reason);
+    log.error('kicked by server', { reason: text || '(empty reason)' });
+    if (diag) {
+      log.error(`why:  ${diag.title}`);
+      log.error(`      ${diag.why}`);
+      log.error(`fix:  ${diag.fix}`);
+      if (diag.id === 'fabric-mod-gate') {
+        // Retrying cannot help — the server refuses us identically every time.
+        fatalModGate = true;
+        log.error('stopping: a Fabric modded server cannot accept this bot.');
+        log.error('Run a VANILLA world (no Fabric API mod) on the same port and start again.');
+      }
+    } else {
+      log.error('hint: unrecognised kick — run `npm run doctor` and share this message.');
     }
   });
   bot.on('error', (err) => log.error('bot error', { error: err.message }));
@@ -138,6 +150,12 @@ async function connect() {
       loop = null;
     }
     try { bot.removeAllListeners('end'); } catch { /* ignore */ }
+    if (fatalModGate) {
+      log.error('not reconnecting: the server refused this client for a reason retrying cannot fix.');
+      process.exitCode = 1;
+      try { bot.quit(); } catch { /* ignore */ }
+      return;
+    }
     scheduleReconnect();
   });
 }
@@ -160,7 +178,7 @@ function startDecisionLoop() {
 }
 
 function scheduleReconnect() {
-  if (stopping) return;
+  if (stopping || fatalModGate) return;
   const delay = settings.reconnectDelayMs ?? 5000;
   log.info('reconnecting in', { ms: delay });
   setTimeout(connect, delay);
