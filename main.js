@@ -13,7 +13,14 @@
  *   MC_HOST=1.2.3.4 MC_PORT=3344 npm start
  */
 
-require('dotenv').config();
+// Dependency preflight FIRST — before any third-party require.
+// Uses only Node built-ins, so it works even when node_modules is empty.
+const { assertInstalled } = require('./src/core/deps');
+assertInstalled();
+
+// .env loader (dotenv is OPTIONAL — we fall back to a built-in parser).
+const { loadEnv, aiConfig } = require('./src/core/env');
+loadEnv();
 
 const mineflayer = require('mineflayer');
 const { pathfinder } = require('mineflayer-pathfinder');
@@ -41,6 +48,14 @@ const target = resolveTarget({ settings, env: process.env });
 for (const w of target.warnings) log.warn(w);
 
 function banner() {
+  // Report the ACTIVE provider/model, not a hardcoded guess — otherwise the
+  // banner can claim Gemini while the orchestrator is really using OpenRouter.
+  const ai = aiConfig();
+  const modelLine =
+    ai.provider === 'none'
+      ? '  Model:   (none — set OPENROUTER_API_KEY or GEMINI_API_KEY in .env)'
+      : `  Model:   ${ai.provider} / ${ai.model}`;
+
   const lines = [
     '═══════════════════════════════════════════════',
     '  MINEMIND-DEEP — LLM-driven Minecraft player',
@@ -48,10 +63,16 @@ function banner() {
     `  Account: ${target.username}`,
     `  Auth:    ${target.auth === 'offline' ? 'OFFLINE' : target.auth.toUpperCase()}`,
     `  Version: ${target.version}`,
-    `  Model:   ${settings.llm?.geminiModel || process.env.GEMINI_MODEL || 'gemini-3.5-flash'}`,
+    modelLine,
     '═══════════════════════════════════════════════',
   ];
   console.log(lines.join('\n'));
+
+  if (ai.provider === 'none') {
+    log.warn('no AI key configured — AGNES will run on the heuristic fallback (not real AI)', {
+      fix: 'add OPENROUTER_API_KEY=... to .env, then run: npm run verify:key',
+    });
+  }
 }
 
 let bot = null;

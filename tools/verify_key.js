@@ -10,7 +10,9 @@
  *   npm run verify:key
  */
 
-require('dotenv').config();
+// dotenv is OPTIONAL — use the project's env loader (falls back to a builtin parser).
+const { loadEnv } = require('../src/core/env');
+loadEnv();
 const { createOrchestrator, buildProviders } = require('../src/llm/orchestrator');
 
 async function main() {
@@ -28,6 +30,8 @@ async function main() {
 
   // Probe each real provider once (skip the mock — it always works).
   let anyReal = false;
+  let anyOk = false;
+  let dailyQuotaHit = false;
   for (const p of providers) {
     if (p.name === 'mock') {
       console.log(`  ${D}skip${X}  mock ${D}(heuristic fallback — always available, but not AI)${X}`);
@@ -43,14 +47,31 @@ async function main() {
       json: true,
     });
     if (res.ok) {
+      anyOk = true;
       console.log(`${G}OK${X}`);
     } else {
       console.log(`${R}FAILED${X}`);
       console.log(`       ${R}${res.kind || '?'}: ${res.error}${X}`);
+      if (/free-models-per-day|daily/i.test(String(res.error || ''))) dailyQuotaHit = true;
     }
   }
 
   console.log('');
+
+  // Clear, specific guidance for the two quota flavours.
+  if (anyReal && !anyOk && dailyQuotaHit) {
+    console.log(`${Y}Your key is VALID, but the free-model DAILY quota is used up.${X}`);
+    console.log(`${D}This is an OpenRouter account limit, not a bug in AGNES, and not a wrong key.${X}`);
+    console.log(`${D}It resets on a 24h rolling window — waiting one minute will NOT help.${X}\n`);
+    console.log(`${B}Three ways out:${X}`);
+    console.log(`  1. ${D}Add credits (smallest fix):${X} openrouter.ai → Credits → top up 10 credits`);
+    console.log(`     ${D}→ unlocks 1000 free-model requests/day.${X}`);
+    console.log(`  2. ${D}Use a paid model:${X} set a small budget and pick any model, e.g.`);
+    console.log(`     ${D}OPENROUTER_MODEL=deepseek/deepseek-chat-v3-0324:free${X} ${D}(still free-tier pool)${X}`);
+    console.log(`     ${D}OPENROUTER_MODEL=anthropic/claude-3.5-haiku${X} ${D}(paid, very cheap)${X}`);
+    console.log(`  3. ${D}Use another provider:${X} GEMINI_API_KEY=AIza...  (aistudio.google.com/apikey)\n`);
+  }
+
   if (!anyReal) {
     console.log(`${Y}No real model configured — the bot will run on the heuristic fallback.${X}`);
     console.log(`${D}That means it moves and survives, but it is NOT choosing actions with AI.${X}\n`);
@@ -61,8 +82,16 @@ async function main() {
     return;
   }
 
-  console.log(`${D}A 403 "unregistered callers" means the key is not a valid Gemini API key.${X}`);
-  console.log(`${D}A 429 means the key works but you hit the free-tier quota (wait ~1 min).${X}\n`);
+  if (!anyOk) {
+    console.log(`${D}A 403 "unregistered callers" means the key is not a valid Gemini API key.${X}`);
+    console.log(`${D}A 429 quota error means the key works but the free tier is exhausted.${X}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(`${G}At least one real model is reachable — AGNES is using AI to choose actions.${X}\n`);
+  console.log(`${D}Check your startup log for "via: openrouter" to confirm a model picked the action.${X}`);
+  console.log(`${D}(If you see "via: mock" instead, that decision came from the heuristic floor.)${X}\n`);
 }
 
 if (require.main === module) {

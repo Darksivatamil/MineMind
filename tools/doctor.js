@@ -15,7 +15,8 @@ const warn = (m) => console.log(`  \x1b[33mWARN\x1b[0m ${m}`);
 console.log('\nMINEMIND-DEEP doctor\n');
 
 console.log('[deps]');
-for (const dep of ['mineflayer', 'mineflayer-pathfinder', 'dotenv', 'vec3']) {
+// REQUIRED deps: missing means the app cannot start at all.
+for (const dep of ['mineflayer', 'vec3']) {
   try {
     require.resolve(dep, { paths: [ROOT] });
     ok(dep);
@@ -23,6 +24,16 @@ for (const dep of ['mineflayer', 'mineflayer-pathfinder', 'dotenv', 'vec3']) {
     bad(`${dep} missing — run: npm install`);
   }
 }
+// OPTIONAL deps: app still runs without these.
+for (const dep of ['mineflayer-pathfinder', 'dotenv']) {
+  try {
+    require.resolve(dep, { paths: [ROOT] });
+    ok(dep);
+  } catch {
+    warn(`${dep} missing — optional, app falls back (npm install to enable)`);
+  }
+}
+console.log('  \x1b[2mif npm install fails on a phone, retry: npm install --fetch-timeout=600000\x1b[0m');
 
 console.log('\n[config]');
 let settings = {};
@@ -33,10 +44,16 @@ try {
   bad(`config/settings.json: ${e.message}`);
 }
 
-require('dotenv').config({ path: path.join(ROOT, '.env') });
-const key = process.env.GEMINI_API_KEY;
-if (key && key.length > 10) ok('GEMINI_API_KEY present');
-else bad('GEMINI_API_KEY missing — copy .env.example to .env and set it');
+// dotenv is OPTIONAL — use the project's env loader (falls back to a builtin parser).
+const { loadEnv, aiConfig, maskKey } = require('../src/core/env');
+loadEnv(path.join(ROOT, '.env'));
+
+const ai = aiConfig();
+if (ai.provider === 'none') {
+  bad('No AI key found — copy .env.example to .env and set OPENROUTER_API_KEY or GEMINI_API_KEY');
+} else {
+  ok(`AI key present (${ai.provider}, model: ${ai.model}, key: ${maskKey(ai.key)})`);
+}
 
 console.log('\n[target]');
 const host = process.env.MC_HOST || settings.host || 'localhost';
@@ -91,7 +108,15 @@ console.log(`  host=${host}  port=${port}  version=${version}  auth=${auth}`);
         console.log('       This key cannot call the model. The bot will fall back to heuristics.');
         console.log('       For Gemini, use a key from https://aistudio.google.com/apikey');
       } else if (r.kind === 'quota') {
-        warn(`${p.name} quota exceeded — free tier is 20 req/min. Wait ~1 minute.`);
+        const msg = String(r.error || '');
+        if (/free-models-per-day|daily/i.test(msg)) {
+          warn(`${p.name} DAILY free-model quota is used up (key is valid).`);
+          console.log('       This is an OpenRouter account limit on a 24h window — waiting a minute will NOT help.');
+          console.log('       Fix: openrouter.ai -> Credits -> top up 10 credits (unlocks 1000/day),');
+          console.log('       or set a paid model, e.g. OPENROUTER_MODEL=anthropic/claude-3.5-haiku');
+        } else {
+          warn(`${p.name} quota exceeded — rate limited (typically 20 req/min on free models). Wait ~1 minute.`);
+        }
       } else {
         bad(`${p.name} failed (${r.kind}): ${String(r.error).slice(0, 90)}`);
       }

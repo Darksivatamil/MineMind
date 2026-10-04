@@ -1,14 +1,15 @@
 # MINEMIND-DEEP — Simple Start Guide
 
-Offline mode · port 3344 · Minecraft 1.21.11 · model `gemini-3.5-flash`
+Offline mode · port 3344 · Minecraft 1.21.11 · OpenRouter / Gemini
 
 ---
 
 ## Step 1 — Go to the project folder
 
 ```bash
-cd /workspace/MINEMIND-DEEP
+cd ~/MineMind
 ```
+> On this cloud machine it is `cd /workspace/MINEMIND-DEEP`.
 
 ---
 
@@ -18,25 +19,69 @@ cd /workspace/MINEMIND-DEEP
 npm install
 ```
 
+**On a phone (Termux) this is the step that breaks most often.** The network is
+slow and `npm install` can fail partway, which used to crash the app with:
+
+```
+Error: Cannot find module 'dotenv'
+```
+
+That is now handled, but you still need the packages. If `npm install` hangs or
+errors, use a longer timeout:
+
+```bash
+npm install --fetch-timeout=600000
+```
+
+If you ever see the friendly "missing dependencies" screen, it means
+`npm install` did not finish — run it again. You can confirm what is missing:
+
+```bash
+npm run doctor
+```
+
 ---
 
-## Step 3 — Add your API key
+## Step 3 — Add your AI key
 
-Open the file `.env` and put your key on the `GEMINI_API_KEY` line:
+Copy the template, then open `.env`:
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Put **one** of these in it:
 
 ```
-GEMINI_API_KEY=your_key_here
+OPENROUTER_API_KEY=sk-or-v1-your-key
+OPENROUTER_MODEL=qwen/qwen3.8-27b:free
 ```
 
-Save it.
+or
+
+```
+GEMINI_API_KEY=AIza...
+GEMINI_MODEL=gemini-3.5-flash
+```
+
+Save: `Ctrl+O` → `Enter` → `Ctrl+X`.
+
+> `dotenv` is optional — the app parses `.env` itself, so a missing `dotenv`
+> package will never stop you now.
 
 ---
 
 ## Step 4 — Check everything is fine
 
 ```bash
+npm run verify:key
 npm run doctor
 ```
+
+`verify:key` must say a real model is reachable. If you see
+`DAILY free-model quota is used up`, your key is fine but OpenRouter's 24-hour
+free allowance is gone — top up 10 credits at openrouter.ai, or switch model.
 
 You want to see these green:
 
