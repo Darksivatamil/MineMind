@@ -156,3 +156,28 @@ test('env.js guards its own dotenv require in a try/catch', () => {
   const after = src.indexOf('} catch', idx);
   assert.ok(before !== -1 && after !== -1 && before < idx && idx < after, 'dotenv require must sit inside a try/catch');
 });
+
+test('deps.js must NOT gate the optional-dep notice behind a logger', () => {
+  // Regression: assertInstalled() is called at the very top of main.js, BEFORE the
+  // app logger exists. An earlier version only warned `if (logger && logger.warn)`,
+  // so a missing optional dep (e.g. dotenv on a partial phone install) was silently
+  // swallowed and the user got no indication anything was absent.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'core', 'deps.js'), 'utf8');
+  assert.ok(
+    !/if\s*\(\s*missingOptional\.length\s*&&\s*logger/.test(src),
+    'the optional-dep notice must not require a logger to be passed'
+  );
+  // ...and there must be a stderr fallback so it is still visible without a logger.
+  assert.ok(
+    /console\.error/.test(src),
+    'deps.js needs a console.error fallback for the optional-dep notice'
+  );
+});
+
+test('assertInstalled() still succeeds when only optional deps are absent', () => {
+  // It must never throw/exit just because something optional is missing.
+  const { assertInstalled } = require('../src/core/deps');
+  const r = assertInstalled(); // no logger — exactly how main.js calls it
+  assert.strictEqual(r.ok, true, 'required deps are installed in this repo');
+  assert.ok(Array.isArray(r.missingOptional));
+});

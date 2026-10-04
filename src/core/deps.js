@@ -66,13 +66,22 @@ function check() {
 /**
  * If required deps are missing, print a friendly, actionable report and exit(1).
  * Otherwise return silently. Safe to call at the very top of an entry point.
+ *
+ * `logger` is OPTIONAL on purpose: this runs before the app logger exists.
+ * When a logger is supplied the optional-dep notice goes through it, otherwise
+ * it is printed directly to stderr so the user is still told what is missing.
  */
 function assertInstalled(logger) {
   const { ok, missing, missingOptional } = check();
   if (ok) {
     // Non-fatal notice for optional deps so the user isn't surprised later.
-    if (missingOptional.length && logger && logger.warn) {
-      logger.warn('optional dependency(ies) not installed', { missingOptional });
+    if (missingOptional.length) {
+      const msg = 'optional dependency(ies) not installed — continuing without them';
+      if (logger && typeof logger.warn === 'function') {
+        logger.warn(msg, { missingOptional });
+      } else {
+        console.error(`[minemind] ${msg}: ${missingOptional.join(', ')}`);
+      }
     }
     return { ok: true, missingOptional };
   }
