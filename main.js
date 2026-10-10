@@ -25,6 +25,9 @@ loadEnv();
 const mineflayer = require('mineflayer');
 const { pathfinder } = require('mineflayer-pathfinder');
 
+// Load pathfinder plugin BEFORE creating bot (mineflayer API changed)
+mineflayer.loadPlugin(pathfinder);
+
 const { resolveTarget } = require('./src/net/target');
 const { tcpCheck } = require('./src/net/preflight');
 const { explainKick } = require('./src/net/fabric_compat');
@@ -108,7 +111,6 @@ async function connect() {
 
   bot.ownerName = target.owner;
   bot._minemindOwner = target.owner;
-  bot.loadPlugin(pathfinder);
 
   bot.once('spawn', () => {
     log.info('AGNES spawned in the world', {
